@@ -426,17 +426,22 @@ export class DifferentialGrowthEngine {
   getRibbonGeometry(width: number): BufferGeometry {
     const safeWidth = Math.max(width, 0.0001);
     const halfWidth = safeWidth * 0.5;
+    const thickness = safeWidth;
 
     let vertexCount = 0;
-    let segmentCount = 0;
+    let indexCount = 0;
     for (let curveIndex = 0; curveIndex < this.curves.length; curveIndex += 1) {
       const curve = this.curves[curveIndex];
       const count = curve.points.length;
       if (count < 2) {
         continue;
       }
-      vertexCount += count * 2;
-      segmentCount += curve.closed ? count : count - 1;
+      const segmentCount = curve.closed ? count : count - 1;
+      vertexCount += count * 4;
+      indexCount += segmentCount * 24;
+      if (!curve.closed) {
+        indexCount += 12;
+      }
     }
 
     const positions = new Float32Array(vertexCount * 3);
@@ -444,10 +449,23 @@ export class DifferentialGrowthEngine {
     const masks = new Float32Array(vertexCount);
     const curvatures = new Float32Array(vertexCount);
     const displacements = new Float32Array(vertexCount);
-    const indices = new Uint32Array(segmentCount * 6);
+    const indices = new Uint32Array(indexCount);
 
     let vertexOffset = 0;
     let indexOffset = 0;
+
+    const pushQuad = (a: number, b: number, c: number, d: number) => {
+      indices[indexOffset] = a;
+      indices[indexOffset + 1] = b;
+      indices[indexOffset + 2] = c;
+      indices[indexOffset + 3] = b;
+      indices[indexOffset + 4] = d;
+      indices[indexOffset + 5] = c;
+      indexOffset += 6;
+    };
+
+    const edgeMix = 0.7071067811865476;
+
     for (let curveIndex = 0; curveIndex < this.curves.length; curveIndex += 1) {
       const curve = this.curves[curveIndex];
       const count = curve.points.length;
@@ -464,46 +482,81 @@ export class DifferentialGrowthEngine {
         const rightX = center.x - normal.x * halfWidth;
         const rightY = center.y - normal.y * halfWidth;
 
-        const left = (vertexOffset + i * 2) * 3;
-        const right = left + 3;
+        const baseVertex = vertexOffset + i * 4;
+        const bottomLeft = baseVertex * 3;
+        const bottomRight = bottomLeft + 3;
+        const topLeft = bottomLeft + 6;
+        const topRight = bottomLeft + 9;
 
-        positions[left] = leftX;
-        positions[left + 1] = leftY;
-        positions[left + 2] = 0;
-        positions[right] = rightX;
-        positions[right + 1] = rightY;
-        positions[right + 2] = 0;
+        positions[bottomLeft] = leftX;
+        positions[bottomLeft + 1] = leftY;
+        positions[bottomLeft + 2] = 0;
+        positions[bottomRight] = rightX;
+        positions[bottomRight + 1] = rightY;
+        positions[bottomRight + 2] = 0;
+        positions[topLeft] = leftX;
+        positions[topLeft + 1] = leftY;
+        positions[topLeft + 2] = thickness;
+        positions[topRight] = rightX;
+        positions[topRight + 1] = rightY;
+        positions[topRight + 2] = thickness;
 
-        normals[left + 2] = 1;
-        normals[right + 2] = 1;
+        normals[bottomLeft] = normal.x * edgeMix;
+        normals[bottomLeft + 1] = normal.y * edgeMix;
+        normals[bottomLeft + 2] = -edgeMix;
+        normals[bottomRight] = -normal.x * edgeMix;
+        normals[bottomRight + 1] = -normal.y * edgeMix;
+        normals[bottomRight + 2] = -edgeMix;
+        normals[topLeft] = normal.x * edgeMix;
+        normals[topLeft + 1] = normal.y * edgeMix;
+        normals[topLeft + 2] = edgeMix;
+        normals[topRight] = -normal.x * edgeMix;
+        normals[topRight + 1] = -normal.y * edgeMix;
+        normals[topRight + 2] = edgeMix;
 
-        const scalarIndex = vertexOffset + i * 2;
-        masks[scalarIndex] = curve.mask[i];
-        masks[scalarIndex + 1] = curve.mask[i];
-        curvatures[scalarIndex] = curve.curvature[i];
-        curvatures[scalarIndex + 1] = curve.curvature[i];
-        displacements[scalarIndex] = curve.displacement[i];
-        displacements[scalarIndex + 1] = curve.displacement[i];
+        masks[baseVertex] = curve.mask[i];
+        masks[baseVertex + 1] = curve.mask[i];
+        masks[baseVertex + 2] = curve.mask[i];
+        masks[baseVertex + 3] = curve.mask[i];
+        curvatures[baseVertex] = curve.curvature[i];
+        curvatures[baseVertex + 1] = curve.curvature[i];
+        curvatures[baseVertex + 2] = curve.curvature[i];
+        curvatures[baseVertex + 3] = curve.curvature[i];
+        displacements[baseVertex] = curve.displacement[i];
+        displacements[baseVertex + 1] = curve.displacement[i];
+        displacements[baseVertex + 2] = curve.displacement[i];
+        displacements[baseVertex + 3] = curve.displacement[i];
       }
 
       const segmentLimit = curve.closed ? count : count - 1;
       for (let i = 0; i < segmentLimit; i += 1) {
         const next = (i + 1) % count;
-        const aLeft = vertexOffset + i * 2;
-        const aRight = aLeft + 1;
-        const bLeft = vertexOffset + next * 2;
-        const bRight = bLeft + 1;
+        const aBase = vertexOffset + i * 4;
+        const bBase = vertexOffset + next * 4;
 
-        indices[indexOffset] = aLeft;
-        indices[indexOffset + 1] = bLeft;
-        indices[indexOffset + 2] = aRight;
-        indices[indexOffset + 3] = bLeft;
-        indices[indexOffset + 4] = bRight;
-        indices[indexOffset + 5] = aRight;
-        indexOffset += 6;
+        const aBottomLeft = aBase;
+        const aBottomRight = aBase + 1;
+        const aTopLeft = aBase + 2;
+        const aTopRight = aBase + 3;
+        const bBottomLeft = bBase;
+        const bBottomRight = bBase + 1;
+        const bTopLeft = bBase + 2;
+        const bTopRight = bBase + 3;
+
+        pushQuad(aBottomLeft, aBottomRight, bBottomLeft, bBottomRight);
+        pushQuad(aTopLeft, bTopLeft, aTopRight, bTopRight);
+        pushQuad(aBottomLeft, bBottomLeft, aTopLeft, bTopLeft);
+        pushQuad(aBottomRight, aTopRight, bBottomRight, bTopRight);
       }
 
-      vertexOffset += count * 2;
+      if (!curve.closed) {
+        const startBase = vertexOffset;
+        const endBase = vertexOffset + (count - 1) * 4;
+        pushQuad(startBase, startBase + 2, startBase + 1, startBase + 3);
+        pushQuad(endBase, endBase + 1, endBase + 2, endBase + 3);
+      }
+
+      vertexOffset += count * 4;
     }
 
     const geometry = new BufferGeometry();

@@ -26,11 +26,12 @@
 - `Stack Layers` simulation toggle:
   - Off (default): classic single-layer simulation view.
   - On: each iteration is stacked upward, with vertical spacing equal to Ribbon Width.
+- Ribbon mesh now extrudes upward with thickness equal to `Ribbon Width` (height = width).
 - Draw visibility toggles:
   - `Show Mesh` (default on): show/hide ribbon mesh.
   - `Show Path` (default off): show/hide curve path overlay.
   - `Show Points` (default off): show/hide growth points overlay.
-- Clicked authoring points are displayed as white sphere markers to distinguish them from growth points.
+- Clicked authoring points are displayed as larger white box-style markers to distinguish them from growth points.
 - Paused draw lock: after pausing simulation, drawing is blocked until `Reset` or `Clear All`.
 
 ## Getting Started
