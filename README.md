@@ -11,6 +11,7 @@
   - global repulsion across curves,
   - point-to-segment self-collision repulsion to reduce curve overlaps/intersections,
   - smoothing/cohesion and shape retention,
+  - side-bias control to favor either side of the drawn median curve,
   - seeded variation and deterministic snapshots.
 - Mask workflow (paint/erase/blur/clear) applied to curve growth.
 - Reused visual stack from the 3D predecessor:

@@ -11,6 +11,7 @@ const growthSettings: GrowthSettings = {
   repulsion: 0.62,
   smoothing: 0.52,
   shapeRetention: 0.09,
+  sideBias: 0,
   maxVertices: 50000,
 };
 

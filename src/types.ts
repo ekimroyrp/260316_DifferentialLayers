@@ -25,6 +25,7 @@ export type GrowthSettings = {
   repulsion: number;
   smoothing: number;
   shapeRetention: number;
+  sideBias: number;
   maxVertices: number;
 };
 

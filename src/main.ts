@@ -86,6 +86,8 @@ type Ui = {
   smoothingValue: HTMLSpanElement;
   shapeRetention: HTMLInputElement;
   shapeRetentionValue: HTMLSpanElement;
+  sideBias: HTMLInputElement;
+  sideBiasValue: HTMLSpanElement;
   maxVertices: HTMLInputElement;
   maxVerticesValue: HTMLSpanElement;
   ribbonWidth: HTMLInputElement;
@@ -175,6 +177,8 @@ const ui: Ui = {
   smoothingValue: must('smoothing-value'),
   shapeRetention: must('shape-retention'),
   shapeRetentionValue: must('shape-retention-value'),
+  sideBias: must('side-bias'),
+  sideBiasValue: must('side-bias-value'),
   maxVertices: must('max-vertices'),
   maxVerticesValue: must('max-vertices-value'),
   ribbonWidth: must('ribbon-width'),
@@ -223,6 +227,7 @@ const growthSettings: GrowthSettings = {
   repulsion: parseFloat(ui.repulsion.value),
   smoothing: parseFloat(ui.smoothing.value),
   shapeRetention: parseFloat(ui.shapeRetention.value),
+  sideBias: parseFloat(ui.sideBias.value),
   maxVertices: parseInt(ui.maxVertices.value, 10),
 };
 const materialSettings: MaterialSettings = {
@@ -897,6 +902,7 @@ bindRange(ui.splitThreshold, ui.splitThresholdValue, (v) => v.toFixed(2), (v) =>
 bindRange(ui.repulsion, ui.repulsionValue, (v) => v.toFixed(2), (v) => { growthSettings.repulsion = v; engine.setGrowthSettings(growthSettings); });
 bindRange(ui.smoothing, ui.smoothingValue, (v) => v.toFixed(2), (v) => { growthSettings.smoothing = v; engine.setGrowthSettings(growthSettings); });
 bindRange(ui.shapeRetention, ui.shapeRetentionValue, (v) => v.toFixed(2), (v) => { growthSettings.shapeRetention = v; engine.setGrowthSettings(growthSettings); });
+bindRange(ui.sideBias, ui.sideBiasValue, (v) => `${Math.round(v)}`, (v) => { growthSettings.sideBias = Math.max(-100, Math.min(100, Math.round(v))); engine.setGrowthSettings(growthSettings); });
 bindRange(ui.maxVertices, ui.maxVerticesValue, (v) => `${Math.round(v)}`, (v) => { growthSettings.maxVertices = Math.round(v); engine.setGrowthSettings(growthSettings); });
 bindRange(ui.ribbonWidth, ui.ribbonWidthValue, (v) => v.toFixed(3), () => { refreshRibbon(); });
 bindRange(ui.curvatureContrast, ui.curvatureContrastValue, (v) => v.toFixed(2), (v) => { materialSettings.curvatureContrast = v; materialController.setMaterialSettings(materialSettings); });

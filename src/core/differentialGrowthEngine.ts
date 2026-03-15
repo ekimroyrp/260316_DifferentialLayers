@@ -240,6 +240,7 @@ export class DifferentialGrowthEngine {
     this.settings.repulsion = settings.repulsion;
     this.settings.smoothing = settings.smoothing;
     this.settings.shapeRetention = settings.shapeRetention;
+    this.settings.sideBias = settings.sideBias;
     this.settings.maxVertices = settings.maxVertices;
   }
 
@@ -465,6 +466,9 @@ export class DifferentialGrowthEngine {
     const influence = MathUtils.clamp(seedInfluence, 0, 1);
     const dynamicNoise = 0.06 * influence;
     const staticVariation = 0.9 * influence;
+    const sideBias = MathUtils.clamp(this.settings.sideBias / 100, -1, 1);
+    const preferredSideSign = sideBias >= 0 ? 1 : -1;
+    const biasMix = Math.abs(sideBias);
 
     const deltaX: Float32Array[] = this.curves.map((curve) => new Float32Array(curve.points.length));
     const deltaY: Float32Array[] = this.curves.map((curve) => new Float32Array(curve.points.length));
@@ -486,6 +490,17 @@ export class DifferentialGrowthEngine {
         const curvature = Math.hypot(avgX - current.x, avgY - current.y) / Math.max(this.settings.targetEdgeLength, 1e-6);
 
         const normal = pointNormal(points, i, curve.closed);
+        const baseNormal = pointNormal(curve.basePoints, i, curve.closed);
+        const medianOffsetX = current.x - curve.basePoints[i].x;
+        const medianOffsetY = current.y - curve.basePoints[i].y;
+        const signedMedianOffset = medianOffsetX * baseNormal.x + medianOffsetY * baseNormal.y;
+        const medianBand = Math.max(this.settings.targetEdgeLength * 0.02, 1e-5);
+        const sideSign = Math.abs(signedMedianOffset) <= medianBand ? (curve.variation[i] >= 0 ? 1 : -1) : Math.sign(signedMedianOffset);
+        const growthNormalX = normal.x * 0.35 + baseNormal.x * 0.65;
+        const growthNormalY = normal.y * 0.35 + baseNormal.y * 0.65;
+        const growthNormalLength = Math.hypot(growthNormalX, growthNormalY);
+        const safeNormalX = growthNormalLength > 1e-8 ? growthNormalX / growthNormalLength : baseNormal.x;
+        const safeNormalY = growthNormalLength > 1e-8 ? growthNormalY / growthNormalLength : baseNormal.y;
         const growthMobility = 1 - MathUtils.clamp(curve.mask[i], 0, 1);
         const jitter = this.rng.signed() * dynamicNoise;
         const seeded = Math.max(0.12, 1 + curve.variation[i] * staticVariation);
@@ -494,8 +509,9 @@ export class DifferentialGrowthEngine {
           this.settings.growthStep * dt * growthMobility * (0.58 + curvature * 0.92 + jitter) * seeded,
         );
 
-        deltaX[curveIndex][i] += normal.x * growth;
-        deltaY[curveIndex][i] += normal.y * growth;
+        const directionFactor = sideSign * (1 - biasMix) + preferredSideSign * biasMix;
+        deltaX[curveIndex][i] += safeNormalX * growth * directionFactor;
+        deltaY[curveIndex][i] += safeNormalY * growth * directionFactor;
       }
 
       const springStrength = 0.52;
