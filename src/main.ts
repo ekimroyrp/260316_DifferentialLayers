@@ -29,7 +29,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { DifferentialGrowthEngine, type DifferentialGrowthSnapshot } from './core/differentialGrowthEngine';
-import { isWithinCloseThreshold } from './core/drawUtils';
+import { buildSubdividedCurve, isWithinCloseThreshold } from './core/drawUtils';
 import { MaterialController } from './core/materialController';
 import type {
   AppState,
@@ -57,6 +57,8 @@ type Ui = {
   undoCurve: HTMLButtonElement;
   clearCurves: HTMLButtonElement;
   drawStatus: HTMLDivElement;
+  startSubdivision: HTMLInputElement;
+  startSubdivisionValue: HTMLSpanElement;
   growthSpeed: HTMLInputElement;
   growthSpeedValue: HTMLSpanElement;
   timeline: HTMLInputElement;
@@ -116,6 +118,7 @@ type UndoState = {
   viewMode: ViewMode;
   engineReady: boolean;
   snapshot: DifferentialGrowthSnapshot | null;
+  baseCurves: CurveData[];
 };
 
 const CLOSE_THRESHOLD_PX = 16;
@@ -143,6 +146,8 @@ const ui: Ui = {
   undoCurve: must('undo-curve'),
   clearCurves: must('clear-curves'),
   drawStatus: must('draw-status'),
+  startSubdivision: must('start-subdivision'),
+  startSubdivisionValue: must('start-subdivision-value'),
   growthSpeed: must('growth-speed'),
   growthSpeedValue: must('growth-speed-value'),
   timeline: must('simulation-timeline'),
@@ -229,6 +234,7 @@ const materialSettings: MaterialSettings = {
   bloom: parseFloat(ui.bloom.value),
 };
 const appState: AppState = { running: false, viewMode: 'gradient' };
+let startSubdivision = Math.max(1, Math.round(parseFloat(ui.startSubdivision.value)));
 
 const renderer = new WebGLRenderer({ antialias: true, canvas, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 3));
@@ -278,6 +284,7 @@ let curves: CurveData[] = [];
 let draft: CurvePoint[] = [];
 let nextCurveId = 1;
 let engineReady = false;
+let baseCurves: CurveData[] = [];
 const timeline: TimelineEntry[] = [];
 let timelineStep = 0;
 let timelineSync = false;
@@ -298,6 +305,7 @@ function captureState(): UndoState {
     viewMode: appState.viewMode,
     engineReady,
     snapshot: engineReady ? engine.exportSnapshot() : null,
+    baseCurves: cloneCurves(baseCurves),
   };
 }
 
@@ -313,6 +321,7 @@ function restoreState(state: UndoState) {
   appState.running = false;
   appState.viewMode = state.viewMode;
   engineReady = state.engineReady;
+  baseCurves = cloneCurves(state.baseCurves);
   if (state.engineReady && state.snapshot) {
     engine.importSnapshot(state.snapshot);
     resetTimeline();
@@ -439,13 +448,24 @@ function worldToScreen(world: CurvePoint | Vector3): Vector2 {
   return tmpS.clone();
 }
 
-function ensureEngine(): boolean {
+function ensureEngine(setBase = true): boolean {
   if (curves.length === 0) return false;
+  const preparedCurves = curves.map((curve) => ({
+    ...curve,
+    points: buildSubdividedCurve(curve.points, curve.closed, startSubdivision).map((point) => ({
+      x: point.x,
+      y: point.y,
+      z: point.z ?? 0,
+    })),
+  }));
   engine.reseed(simulationSettings.seed);
   engine.setGrowthSettings(growthSettings);
-  engine.setCurves(curves, growthSettings.targetEdgeLength);
+  engine.setCurves(preparedCurves, growthSettings.targetEdgeLength);
   engine.setGradientBlur(materialSettings.gradientBlur);
   engineReady = true;
+  if (setBase) {
+    baseCurves = cloneCurves(curves);
+  }
   refreshRibbon();
   resetTimeline();
   return true;
@@ -646,6 +666,10 @@ function exportPng() {
   renderer.domElement.toBlob((blob) => blob && download(`differential-layers-step-${timelineStep}.png`, blob), 'image/png');
 }
 
+bindRange(ui.startSubdivision, ui.startSubdivisionValue, (v) => `${Math.round(v)}`, (v) => {
+  startSubdivision = Math.max(1, Math.round(v));
+  engineReady = false;
+});
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (v) => v.toFixed(2), (v) => { simulationSettings.growthSpeed = v; });
 bindRange(ui.seed, ui.seedValue, (v) => `${Math.round(v)}`, (v) => { simulationSettings.seed = Math.round(v); engineReady = false; });
 bindRange(ui.seedInfluence, ui.seedInfluenceValue, (v) => v.toFixed(2), (v) => { simulationSettings.seedInfluence = v; });
@@ -671,7 +695,30 @@ ui.gradientEnd.addEventListener('input', () => { materialSettings.gradientEnd = 
 ui.gradientType.addEventListener('change', () => { materialSettings.gradientType = ui.gradientType.value as GradientType; materialController.setMaterialSettings(materialSettings); });
 
 ui.start.addEventListener('click', () => { pushUndoState(); startStop(); refreshStatus(); syncUi(); });
-ui.reset.addEventListener('click', () => { pushUndoState(); appState.running = false; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus(); syncUi(); });
+ui.reset.addEventListener('click', () => {
+  pushUndoState();
+  appState.running = false;
+  setMode('gradient');
+
+  if (!engineReady) {
+    baseCurves = cloneCurves(curves);
+  }
+
+  if (baseCurves.length > 0) {
+    curves = cloneCurves(baseCurves);
+    draft = [];
+    engineReady = false;
+    ensureEngine(false);
+  } else {
+    engineReady = false;
+    clearRibbon();
+    clearTimeline();
+  }
+
+  refreshOverlays();
+  refreshStatus();
+  syncUi();
+});
 ui.maskMode.addEventListener('click', () => {
   pushUndoState();
   if (appState.viewMode === 'mask') setMode('gradient');
@@ -703,7 +750,7 @@ ui.undoCurve.addEventListener('click', () => {
 });
 ui.clearCurves.addEventListener('click', () => {
   pushUndoState();
-  curves = []; draft = []; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
+  curves = []; draft = []; baseCurves = []; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
 });
 
 ui.exportObj.addEventListener('click', exportObj);

@@ -1,7 +1,7 @@
 ﻿import { describe, expect, it } from 'vitest';
 import { Vector2 } from 'three';
 import { DifferentialGrowthEngine } from '../src/core/differentialGrowthEngine';
-import { isWithinCloseThreshold } from '../src/core/drawUtils';
+import { buildSubdividedCurve, isWithinCloseThreshold } from '../src/core/drawUtils';
 import type { CurveData, GrowthSettings } from '../src/types';
 
 const growthSettings: GrowthSettings = {
@@ -109,6 +109,42 @@ describe('DifferentialGrowthEngine dynamics', () => {
     expect(afterGap).toBeGreaterThan(beforeGap);
   });
 
+  it('repels a point away from nearby segment interiors', () => {
+    const settings = {
+      ...growthSettings,
+      growthStep: 0,
+      repulsion: 1,
+      smoothing: 0,
+      shapeRetention: 0,
+      targetEdgeLength: 0.1,
+      splitThreshold: 1.35,
+    };
+    const engine = new DifferentialGrowthEngine(settings, 17);
+    engine.setCurves([
+      {
+        id: 1,
+        closed: false,
+        points: [
+          { x: -0.5, y: 0, z: 0 },
+          { x: 0.5, y: 0, z: 0 },
+        ],
+      },
+      {
+        id: 2,
+        closed: false,
+        points: [
+          { x: 0, y: 0.02, z: 0 },
+          { x: 0, y: 0.4, z: 0 },
+        ],
+      },
+    ], 0.1);
+
+    const before = engine.getCurves()[1].points[0].y;
+    engine.step(0.02, 1, 0);
+    const after = engine.getCurves()[1].points[0].y;
+    expect(after).toBeGreaterThan(before);
+  });
+
   it('produces deterministic output for same seed and input', () => {
     const curves: CurveData[] = [{
       id: 1,
@@ -151,5 +187,18 @@ describe('Close-threshold utility', () => {
 
   it('returns false when pointer is outside threshold', () => {
     expect(isWithinCloseThreshold(new Vector2(100, 100), new Vector2(130, 100), 16)).toBe(false);
+  });
+});
+
+describe('Start subdivision utility', () => {
+  it('creates denser start curves when subdivision is increased', () => {
+    const points = [
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0.5, z: 0 },
+      { x: 2, y: 0, z: 0 },
+    ];
+    const base = buildSubdividedCurve(points, false, 1);
+    const dense = buildSubdividedCurve(points, false, 6);
+    expect(dense.length).toBeGreaterThan(base.length);
   });
 });

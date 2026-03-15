@@ -72,6 +72,13 @@
           </div>
           <div class="panel-section-content panel-controls-stack">
             <div id="draw-status" class="control-hint">Click to start a curve.</div>
+            <label class="control">
+              <div class="control-row">
+                <span>Start Subdivision</span>
+                <span id="start-subdivision-value">1</span>
+              </div>
+              <input type="range" id="start-subdivision" min="1" max="12" step="1" value="1" />
+            </label>
             <div class="control control-grid-3">
               <button type="button" id="undo-point" class="pill-button control-button-wide">Undo Point</button>
               <button type="button" id="undo-curve" class="pill-button control-button-wide">Undo Curve</button>
@@ -120,33 +127,33 @@
             <label class="control">
               <div class="control-row">
                 <span>Growth Step</span>
-                <span id="growth-step-value">0.22</span>
+                <span id="growth-step-value">1.33</span>
               </div>
-              <input type="range" id="growth-step" min="0.05" max="2" step="0.01" value="0.22" />
+              <input type="range" id="growth-step" min="0.05" max="2" step="0.01" value="1.33" />
             </label>
 
             <label class="control">
               <div class="control-row">
                 <span>Growth Seed</span>
-                <span id="seed-value-label">351107</span>
+                <span id="seed-value-label">520671</span>
               </div>
-              <input type="range" id="seed-value" min="0" max="999999" step="1" value="351107" />
+              <input type="range" id="seed-value" min="0" max="999999" step="1" value="520671" />
             </label>
 
             <label class="control">
               <div class="control-row">
                 <span>Growth Jitter</span>
-                <span id="seed-influence-value">0.35</span>
+                <span id="seed-influence-value">0.62</span>
               </div>
-              <input type="range" id="seed-influence" min="0" max="1" step="0.01" value="0.35" />
+              <input type="range" id="seed-influence" min="0" max="1" step="0.01" value="0.62" />
             </label>
 
             <label class="control">
               <div class="control-row">
                 <span>Target Edge Length</span>
-                <span id="target-edge-length-value">0.10</span>
+                <span id="target-edge-length-value">0.060</span>
               </div>
-              <input type="range" id="target-edge-length" min="0.02" max="0.3" step="0.005" value="0.10" />
+              <input type="range" id="target-edge-length" min="0.02" max="0.3" step="0.005" value="0.060" />
             </label>
 
             <label class="control">
@@ -160,25 +167,25 @@
             <label class="control">
               <div class="control-row">
                 <span>Repulsion Force</span>
-                <span id="repulsion-value">0.62</span>
+                <span id="repulsion-value">0.68</span>
               </div>
-              <input type="range" id="repulsion" min="0" max="1" step="0.01" value="0.62" />
+              <input type="range" id="repulsion" min="0" max="1" step="0.01" value="0.68" />
             </label>
 
             <label class="control">
               <div class="control-row">
                 <span>Cohesion Smoothing</span>
-                <span id="smoothing-value">1.00</span>
+                <span id="smoothing-value">0.14</span>
               </div>
-              <input type="range" id="smoothing" min="0" max="1" step="0.01" value="1" />
+              <input type="range" id="smoothing" min="0" max="1" step="0.01" value="0.14" />
             </label>
 
             <label class="control">
               <div class="control-row">
                 <span>Shape Retention</span>
-                <span id="shape-retention-value">0.12</span>
+                <span id="shape-retention-value">0.00</span>
               </div>
-              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0.12" />
+              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0.00" />
             </label>
 
             <label class="control">
@@ -192,9 +199,9 @@
             <label class="control">
               <div class="control-row">
                 <span>Ribbon Width</span>
-                <span id="ribbon-width-value">0.08</span>
+                <span id="ribbon-width-value">0.038</span>
               </div>
-              <input type="range" id="ribbon-width" min="0.01" max="0.2" step="0.002" value="0.08" />
+              <input type="range" id="ribbon-width" min="0.01" max="0.2" step="0.002" value="0.038" />
             </label>
           </div>
         </section>

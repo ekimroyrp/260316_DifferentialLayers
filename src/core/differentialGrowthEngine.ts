@@ -18,6 +18,17 @@ type PointRef = {
   pointIndex: number;
 };
 
+type SegmentRef = {
+  curveIndex: number;
+  segmentIndex: number;
+  aIndex: number;
+  bIndex: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
 const tempVecA = new Vector3();
 
 export type CurveSnapshot = {
@@ -519,6 +530,7 @@ export class DifferentialGrowthEngine {
     }
 
     this.applySpatialRepulsion(deltaX, deltaY, dt);
+    this.applyPointSegmentRepulsion(deltaX, deltaY, dt);
 
     const maxDisplacement = this.settings.targetEdgeLength * 0.24;
     for (let curveIndex = 0; curveIndex < this.curves.length; curveIndex += 1) {
@@ -615,6 +627,140 @@ export class DifferentialGrowthEngine {
               deltaY[curveIndex][pointIndex] += fy;
               deltaX[other.curveIndex][other.pointIndex] -= fx;
               deltaY[other.curveIndex][other.pointIndex] -= fy;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private applyPointSegmentRepulsion(deltaX: Float32Array[], deltaY: Float32Array[], dt: number): void {
+    if (this.settings.repulsion <= 0) {
+      return;
+    }
+
+    const radius = this.settings.targetEdgeLength * this.settings.splitThreshold * 1.25;
+    if (radius <= 1e-6) {
+      return;
+    }
+    const radiusSq = radius * radius;
+    const cellSize = radius;
+    const invCell = 1 / cellSize;
+    const grid = new Map<string, SegmentRef[]>();
+
+    for (let curveIndex = 0; curveIndex < this.curves.length; curveIndex += 1) {
+      const curve = this.curves[curveIndex];
+      const segmentLimit = curve.closed ? curve.points.length : curve.points.length - 1;
+      for (let segmentIndex = 0; segmentIndex < segmentLimit; segmentIndex += 1) {
+        const aIndex = segmentIndex;
+        const bIndex = (segmentIndex + 1) % curve.points.length;
+        const a = curve.points[aIndex];
+        const b = curve.points[bIndex];
+        const minX = Math.min(a.x, b.x) - radius;
+        const maxX = Math.max(a.x, b.x) + radius;
+        const minY = Math.min(a.y, b.y) - radius;
+        const maxY = Math.max(a.y, b.y) + radius;
+        const cellMinX = Math.floor(minX * invCell);
+        const cellMaxX = Math.floor(maxX * invCell);
+        const cellMinY = Math.floor(minY * invCell);
+        const cellMaxY = Math.floor(maxY * invCell);
+        const ref: SegmentRef = { curveIndex, segmentIndex, aIndex, bIndex, minX, maxX, minY, maxY };
+
+        for (let cx = cellMinX; cx <= cellMaxX; cx += 1) {
+          for (let cy = cellMinY; cy <= cellMaxY; cy += 1) {
+            const key = `${cx}|${cy}`;
+            const bucket = grid.get(key);
+            if (bucket) {
+              bucket.push(ref);
+            } else {
+              grid.set(key, [ref]);
+            }
+          }
+        }
+      }
+    }
+
+    const strength = this.settings.repulsion * dt * 0.055;
+    for (let curveIndex = 0; curveIndex < this.curves.length; curveIndex += 1) {
+      const curve = this.curves[curveIndex];
+      for (let pointIndex = 0; pointIndex < curve.points.length; pointIndex += 1) {
+        const point = curve.points[pointIndex];
+        const cellX = Math.floor(point.x * invCell);
+        const cellY = Math.floor(point.y * invCell);
+        const visited = new Set<string>();
+
+        for (let ox = -1; ox <= 1; ox += 1) {
+          for (let oy = -1; oy <= 1; oy += 1) {
+            const key = `${cellX + ox}|${cellY + oy}`;
+            const bucket = grid.get(key);
+            if (!bucket) {
+              continue;
+            }
+
+            for (let si = 0; si < bucket.length; si += 1) {
+              const segment = bucket[si];
+              const segmentKey = `${segment.curveIndex}:${segment.segmentIndex}`;
+              if (visited.has(segmentKey)) {
+                continue;
+              }
+              visited.add(segmentKey);
+
+              if (
+                point.x < segment.minX || point.x > segment.maxX ||
+                point.y < segment.minY || point.y > segment.maxY
+              ) {
+                continue;
+              }
+
+              const targetCurve = this.curves[segment.curveIndex];
+              if (curve === targetCurve) {
+                if (
+                  pointIndex === segment.aIndex || pointIndex === segment.bIndex ||
+                  this.areAdjacent(curve, pointIndex, targetCurve, segment.aIndex) ||
+                  this.areAdjacent(curve, pointIndex, targetCurve, segment.bIndex)
+                ) {
+                  continue;
+                }
+              }
+
+              const a = targetCurve.points[segment.aIndex];
+              const b = targetCurve.points[segment.bIndex];
+              const vx = b.x - a.x;
+              const vy = b.y - a.y;
+              const lenSq = vx * vx + vy * vy;
+              if (lenSq <= 1e-12) {
+                continue;
+              }
+
+              const wx = point.x - a.x;
+              const wy = point.y - a.y;
+              const t = MathUtils.clamp((wx * vx + wy * vy) / lenSq, 0, 1);
+              const closestX = a.x + vx * t;
+              const closestY = a.y + vy * t;
+              const dx = point.x - closestX;
+              const dy = point.y - closestY;
+              const distSq = dx * dx + dy * dy;
+              if (distSq <= 1e-12 || distSq >= radiusSq) {
+                continue;
+              }
+
+              const dist = Math.sqrt(distSq);
+              const falloff = 1 - dist / radius;
+              const force = (strength * falloff) / (distSq + 1e-6);
+              const ux = dx / dist;
+              const uy = dy / dist;
+              const fx = ux * force;
+              const fy = uy * force;
+
+              deltaX[curveIndex][pointIndex] += fx;
+              deltaY[curveIndex][pointIndex] += fy;
+
+              const weightA = 1 - t;
+              const weightB = t;
+              deltaX[segment.curveIndex][segment.aIndex] -= fx * weightA;
+              deltaY[segment.curveIndex][segment.aIndex] -= fy * weightA;
+              deltaX[segment.curveIndex][segment.bIndex] -= fx * weightB;
+              deltaY[segment.curveIndex][segment.bIndex] -= fy * weightB;
             }
           }
         }

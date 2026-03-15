@@ -9,6 +9,7 @@
   - resampling to target spacing,
   - adaptive segment splitting,
   - global repulsion across curves,
+  - point-to-segment self-collision repulsion to reduce curve overlaps/intersections,
   - smoothing/cohesion and shape retention,
   - seeded variation and deterministic snapshots.
 - Mask workflow (paint/erase/blur/clear) applied to curve growth.
