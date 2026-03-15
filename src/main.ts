@@ -4,6 +4,7 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  Group,
   LineBasicMaterial,
   LineSegments,
   MOUSE,
@@ -19,6 +20,7 @@ import {
   Scene,
   Vector2,
   Vector3,
+  WebGLRenderTarget,
   WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -30,6 +32,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { DifferentialGrowthEngine, type DifferentialGrowthSnapshot } from './core/differentialGrowthEngine';
 import { buildSubdividedCurve, isWithinCloseThreshold } from './core/drawUtils';
+import { InfiniteFadingGrid } from './core/infiniteGrid';
 import { MaterialController } from './core/materialController';
 import type {
   AppState,
@@ -244,8 +247,26 @@ renderer.toneMapping = ACESFilmicToneMapping;
 
 const scene = new Scene();
 scene.background = new Color(0x111622);
-const camera = new PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.01, 100);
-camera.position.set(0, 0.25, 4.2);
+const camera = new PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.01, 500);
+camera.position.set(0, 2.6, 3.6);
+
+const groundGrid = new InfiniteFadingGrid({
+  width: 200,
+  height: 200,
+  sectionSize: 5,
+  sectionThickness: 1.35,
+  cellSize: 1,
+  cellThickness: 0.68,
+  cellColor: '#8b9095',
+  sectionColor: '#5e6368',
+  fadeDistance: 140,
+  fadeStrength: 1.2,
+  infiniteGrid: true,
+  followCamera: true,
+  y: 0.001,
+  opacity: 2,
+});
+scene.add(groundGrid.mesh);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -257,25 +278,40 @@ controls.update();
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 
 const materialController = new MaterialController(materialSettings);
+const simRoot = new Group();
+simRoot.rotation.x = -Math.PI / 2;
+scene.add(simRoot);
 const ribbonMesh = new Mesh(new BufferGeometry(), materialController.material);
-scene.add(ribbonMesh);
+simRoot.add(ribbonMesh);
 const lineMesh = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x2bb2ff, transparent: true, opacity: 0.9 }));
-scene.add(lineMesh);
+simRoot.add(lineMesh);
 const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({ color: 0xa8b0c2, size: 6, sizeAttenuation: false }));
-scene.add(pointsMesh);
+simRoot.add(pointsMesh);
 
 const engine = new DifferentialGrowthEngine(growthSettings, simulationSettings.seed);
 engine.setGradientBlur(materialSettings.gradientBlur);
 
-const composer = new EffectComposer(renderer);
+const composerTarget = new WebGLRenderTarget(window.innerWidth, window.innerHeight);
+composerTarget.samples = Math.min(4, renderer.capabilities.maxSamples);
+const composer = new EffectComposer(renderer, composerTarget);
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(new Vector2(window.innerWidth, window.innerHeight), materialSettings.bloom, 0.7, 0.15);
 composer.addPass(bloomPass);
 const fxaaPass = new ShaderPass(FXAAShader);
 composer.addPass(fxaaPass);
 
+const updatePostSize = () => {
+  const pr = Math.min(window.devicePixelRatio * 1.5, 3);
+  renderer.setPixelRatio(pr);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  composer.setPixelRatio(pr);
+  bloomPass.setSize(window.innerWidth, window.innerHeight);
+  fxaaPass.material.uniforms.resolution.value.set(1 / (window.innerWidth * pr), 1 / (window.innerHeight * pr));
+};
+
 const raycaster = new Raycaster();
-const plane = new Plane(new Vector3(0, 0, 1), 0);
+const plane = new Plane(new Vector3(0, 1, 0), 0);
 const pointer = new Vector2();
 const tmpV = new Vector3();
 const tmpS = new Vector2();
@@ -355,13 +391,183 @@ function bindRange(input: HTMLInputElement, label: HTMLSpanElement, fmt: (v: num
     const value = parseFloat(input.value);
     label.textContent = fmt(value);
     onInput(value);
-    const min = parseFloat(input.min);
-    const max = parseFloat(input.max);
-    const p = max > min ? ((value - min) / (max - min)) * 100 : 100;
-    input.style.setProperty('--range-progress', `${p}%`);
+    updateRangeProgress(input);
   };
   input.addEventListener('input', update);
   update();
+}
+
+function updateRangeProgress(input: HTMLInputElement) {
+  const value = Number.parseFloat(input.value);
+  const min = Number.parseFloat(input.min);
+  const max = Number.parseFloat(input.max);
+  const p = Number.isFinite(min) && Number.isFinite(max) && max > min ? ((value - min) / (max - min)) * 100 : 100;
+  input.style.setProperty('--range-progress', `${Math.max(0, Math.min(100, p))}%`);
+}
+
+function bindCustomSelect(select: HTMLSelectElement) {
+  const control = select.closest('.select-control');
+  const shell = control?.querySelector('.select-shell');
+  if (!control || !shell) return;
+
+  select.classList.add('native-select-hidden');
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-trigger';
+  trigger.id = `${select.id}-trigger`;
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const menu = document.createElement('ul');
+  menu.className = 'select-menu';
+  menu.id = `${select.id}-menu`;
+  menu.hidden = true;
+  menu.setAttribute('role', 'listbox');
+  menu.setAttribute('aria-labelledby', trigger.id);
+
+  type OptionButton = HTMLButtonElement & { dataset: DOMStringMap & { value: string; index: string } };
+  const optionButtons: OptionButton[] = [];
+  const optionValues = Array.from(select.options).map((option) => option.value);
+  let activeIndex = Math.max(0, optionValues.indexOf(select.value));
+
+  const buildOptionButton = (index: number, label: string, value: string): OptionButton => {
+    const item = document.createElement('li');
+    const button = document.createElement('button') as OptionButton;
+    button.type = 'button';
+    button.className = 'select-option';
+    button.dataset.value = value;
+    button.dataset.index = `${index}`;
+    button.textContent = label;
+    button.setAttribute('role', 'option');
+    item.appendChild(button);
+    menu.appendChild(item);
+    return button;
+  };
+
+  Array.from(select.options).forEach((option, index) => {
+    optionButtons.push(buildOptionButton(index, option.textContent ?? option.value, option.value));
+  });
+
+  const setOpen = (open: boolean) => {
+    control.classList.toggle('is-open', open);
+    menu.hidden = !open;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+
+  const updateSelectionUi = () => {
+    const selectedIndex = Math.max(0, optionValues.indexOf(select.value));
+    const selectedButton = optionButtons[selectedIndex];
+    trigger.textContent = selectedButton?.textContent ?? select.value;
+    optionButtons.forEach((button, index) => {
+      const selected = index === selectedIndex;
+      const active = index === activeIndex;
+      button.classList.toggle('is-selected', selected);
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      button.tabIndex = active ? 0 : -1;
+    });
+  };
+
+  const setActiveIndex = (index: number) => {
+    if (optionButtons.length === 0) return;
+    const count = optionButtons.length;
+    activeIndex = ((index % count) + count) % count;
+    updateSelectionUi();
+  };
+
+  const chooseIndex = (index: number) => {
+    const nextValue = optionValues[index];
+    if (nextValue === undefined) return;
+    const changed = select.value !== nextValue;
+    select.value = nextValue;
+    activeIndex = index;
+    updateSelectionUi();
+    setOpen(false);
+    if (changed) {
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
+  const openMenu = (focusOption = false) => {
+    setActiveIndex(Math.max(0, optionValues.indexOf(select.value)));
+    setOpen(true);
+    if (focusOption) optionButtons[activeIndex]?.focus();
+  };
+
+  select.addEventListener('change', () => {
+    activeIndex = Math.max(0, optionValues.indexOf(select.value));
+    updateSelectionUi();
+    setOpen(false);
+  });
+
+  trigger.addEventListener('click', () => {
+    if (control.classList.contains('is-open')) setOpen(false);
+    else openMenu();
+  });
+
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!control.classList.contains('is-open')) openMenu(true);
+      else {
+        setActiveIndex(activeIndex + 1);
+        optionButtons[activeIndex]?.focus();
+      }
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!control.classList.contains('is-open')) openMenu(true);
+      else {
+        setActiveIndex(activeIndex - 1);
+        optionButtons[activeIndex]?.focus();
+      }
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (control.classList.contains('is-open')) chooseIndex(activeIndex);
+      else openMenu(true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setOpen(false);
+    }
+  });
+
+  optionButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const index = Number.parseInt(button.dataset.index, 10);
+      chooseIndex(index);
+      trigger.focus();
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveIndex(activeIndex + 1);
+        optionButtons[activeIndex]?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveIndex(activeIndex - 1);
+        optionButtons[activeIndex]?.focus();
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        chooseIndex(activeIndex);
+        trigger.focus();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        trigger.focus();
+      } else if (event.key === 'Tab') {
+        setOpen(false);
+      }
+    });
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target;
+    if (!(target instanceof Node) || !control.contains(target)) setOpen(false);
+  });
+
+  shell.prepend(menu);
+  shell.prepend(trigger);
+  updateSelectionUi();
 }
 
 function bindSectionCollapses() {
@@ -418,6 +624,7 @@ function syncTimeline() {
     ui.timelineValue.textContent = `${timelineStep}`;
   }
   ui.timeline.disabled = appState.running || timeline.length === 0;
+  updateRangeProgress(ui.timeline);
   timelineSync = false;
 }
 
@@ -434,7 +641,12 @@ function pointerToPlane(event: PointerEvent): Vector3 | null {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
   const hit = new Vector3();
-  return raycaster.ray.intersectPlane(plane, hit) ? hit : null;
+  if (!raycaster.ray.intersectPlane(plane, hit)) {
+    return null;
+  }
+  simRoot.worldToLocal(hit);
+  hit.z = 0;
+  return hit;
 }
 
 function isPanelTarget(event: Event): boolean {
@@ -443,7 +655,9 @@ function isPanelTarget(event: Event): boolean {
 
 function worldToScreen(world: CurvePoint | Vector3): Vector2 {
   const rect = renderer.domElement.getBoundingClientRect();
-  tmpV.set(world.x, world.y, 0).project(camera);
+  tmpV.set(world.x, world.y, 0);
+  simRoot.localToWorld(tmpV);
+  tmpV.project(camera);
   tmpS.set(rect.left + (tmpV.x * 0.5 + 0.5) * rect.width, rect.top + (-tmpV.y * 0.5 + 0.5) * rect.height);
   return tmpS.clone();
 }
@@ -637,6 +851,7 @@ function download(name: string, blob: Blob) {
 
 function exportObj() {
   const data = exportColorizedGeometry(); if (!data) return;
+  data.g.rotateX(-Math.PI / 2);
   const pos = data.g.getAttribute('position') as BufferAttribute;
   const idx = data.g.index;
   const lines: string[] = [];
@@ -651,6 +866,7 @@ function exportObj() {
 
 function exportGlb() {
   const data = exportColorizedGeometry(); if (!data) return;
+  data.g.rotateX(-Math.PI / 2);
   data.g.setAttribute('color', new BufferAttribute(data.colors, 3));
   const mesh = new Mesh(data.g, new MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.08 }));
   new GLTFExporter().parse(mesh, (result) => {
@@ -758,6 +974,7 @@ ui.exportGlb.addEventListener('click', exportGlb);
 ui.exportScreenshot.addEventListener('click', exportPng);
 
 ui.timeline.addEventListener('input', () => {
+  updateRangeProgress(ui.timeline);
   if (timelineSync || appState.running || timeline.length === 0) return;
   const step = Math.round(parseFloat(ui.timeline.value));
   let best = timeline[0]; let dist = Math.abs(best.step - step);
@@ -826,13 +1043,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('resize', () => {
-  const pr = Math.min(window.devicePixelRatio * 1.5, 3);
-  renderer.setPixelRatio(pr);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
-  composer.setPixelRatio(pr);
-  bloomPass.setSize(window.innerWidth, window.innerHeight);
-  fxaaPass.material.uniforms.resolution.value.set(1 / (window.innerWidth * pr), 1 / (window.innerHeight * pr));
+  updatePostSize();
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   clampPanelToViewport();
@@ -843,6 +1054,7 @@ renderer.setAnimationLoop((now) => {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   controls.update();
+  groundGrid.update(camera);
   if (appState.running) {
     engine.step(dt, simulationSettings.growthSpeed, simulationSettings.seedInfluence);
     refreshRibbon();
@@ -856,3 +1068,5 @@ refreshStatus();
 syncUi();
 setMode('gradient');
 bindSectionCollapses();
+bindCustomSelect(ui.gradientType);
+updatePostSize();
