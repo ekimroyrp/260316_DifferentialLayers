@@ -346,6 +346,61 @@ export class DifferentialGrowthEngine {
     this.updateScalarFields();
   }
 
+  applyMaskFromSnapshot(snapshot: DifferentialGrowthSnapshot, blendMode: 'replace' | 'max' = 'replace'): void {
+    if (this.curves.length === 0 || snapshot.curves.length === 0) {
+      return;
+    }
+
+    const sourceById = new Map<number, { closed: boolean; mask: number[] }>();
+    for (let i = 0; i < snapshot.curves.length; i += 1) {
+      const source = snapshot.curves[i];
+      sourceById.set(source.id, { closed: source.closed, mask: source.mask });
+    }
+
+    for (let curveIndex = 0; curveIndex < this.curves.length; curveIndex += 1) {
+      const target = this.curves[curveIndex];
+      const source = sourceById.get(target.id);
+      if (!source || source.mask.length === 0) {
+        continue;
+      }
+
+      const targetCount = target.points.length;
+      const sourceCount = source.mask.length;
+      if (targetCount === 0) {
+        continue;
+      }
+
+      if (sourceCount === 1) {
+        target.mask.fill(MathUtils.clamp(source.mask[0], 0, 1));
+        continue;
+      }
+
+      for (let i = 0; i < targetCount; i += 1) {
+        const t = source.closed ? i / targetCount : (targetCount === 1 ? 0 : i / (targetCount - 1));
+        let sampled = 0;
+
+        if (source.closed) {
+          const position = t * sourceCount;
+          const base = Math.floor(position) % sourceCount;
+          const next = (base + 1) % sourceCount;
+          const alpha = position - Math.floor(position);
+          sampled = MathUtils.lerp(source.mask[base] ?? 0, source.mask[next] ?? 0, alpha);
+        } else {
+          const position = t * (sourceCount - 1);
+          const base = Math.floor(position);
+          const next = Math.min(base + 1, sourceCount - 1);
+          const alpha = position - base;
+          sampled = MathUtils.lerp(source.mask[base] ?? 0, source.mask[next] ?? 0, alpha);
+        }
+
+        const clamped = MathUtils.clamp(sampled, 0, 1);
+        target.mask[i] = blendMode === 'max' ? Math.max(target.mask[i], clamped) : clamped;
+      }
+    }
+
+    this.updateScalarFields();
+  }
+
   step(deltaSeconds: number, growthSpeed: number, seedInfluence = 0.35): void {
     if (this.curves.length === 0) {
       return;

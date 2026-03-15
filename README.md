@@ -16,6 +16,7 @@
   - side-bias control to favor either side of the drawn median curve,
   - seeded variation and deterministic snapshots.
 - Mask workflow (paint/erase/blur/clear) applied to curve growth.
+- Mask-reset behavior preserves baseline pre-run mask while also projecting paused runtime mask edits back onto reset state.
 - Reused visual stack from the 3D predecessor:
   - same panel style/environment look,
   - bloom + FXAA postprocessing,
@@ -62,9 +63,10 @@
 - Mask mode:
   - `LMB`: paint mask
   - `Shift + LMB`: erase mask
+  - clicking `Enter Mask Mode`, `Blur Mask`, or `Clear Mask` while running pauses simulation and enters mask mode
 - Simulation:
   - `Start/Pause`: run or stop growth
-  - `Reset`: reset simulation state
+  - `Reset`: reset geometry back to simulation start state while preserving mask intent
   - `Simulation Timeline`: scrub recorded steps (when paused)
 - Visibility:
   - `Show Mesh`: toggle ribbon mesh visibility

@@ -256,6 +256,7 @@ const materialSettings: MaterialSettings = {
 };
 const appState: AppState = { running: false, viewMode: 'gradient' };
 let startSubdivision = Math.max(1, Math.round(parseFloat(ui.startSubdivision.value)));
+let baseSubdivision = startSubdivision;
 
 const renderer = new WebGLRenderer({ antialias: true, canvas, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio * 1.5, 3));
@@ -359,6 +360,7 @@ let draft: CurvePoint[] = [];
 let nextCurveId = 1;
 let engineReady = false;
 let baseCurves: CurveData[] = [];
+let baseResetSnapshot: DifferentialGrowthSnapshot | null = null;
 const timeline: TimelineEntry[] = [];
 let timelineStep = 0;
 let timelineSync = false;
@@ -848,11 +850,12 @@ function worldToScreen(world: CurvePoint | Vector3): Vector2 {
   return tmpS.clone();
 }
 
-function ensureEngine(setBase = true): boolean {
+function ensureEngine(setBase = true, subdivisionOverride?: number): boolean {
   if (curves.length === 0) return false;
+  const effectiveSubdivision = subdivisionOverride ?? startSubdivision;
   const preparedCurves = curves.map((curve) => ({
     ...curve,
-    points: buildSubdividedCurve(curve.points, curve.closed, startSubdivision).map((point) => ({
+    points: buildSubdividedCurve(curve.points, curve.closed, effectiveSubdivision).map((point) => ({
       x: point.x,
       y: point.y,
       z: point.z ?? 0,
@@ -865,6 +868,8 @@ function ensureEngine(setBase = true): boolean {
   engineReady = true;
   if (setBase) {
     baseCurves = cloneCurves(curves);
+    baseSubdivision = effectiveSubdivision;
+    baseResetSnapshot = engine.exportSnapshot();
   }
   refreshRibbon();
   resetTimeline();
@@ -989,7 +994,10 @@ function refreshStatus() {
 function syncUi() {
   const drawEditingDisabled = appState.running || appState.viewMode === 'mask' || drawLockedAfterPause;
   ui.start.textContent = appState.running ? 'Pause' : 'Start';
+  ui.start.classList.toggle('is-start-state', !appState.running);
+  ui.start.classList.toggle('is-stop-state', appState.running);
   ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
+  ui.maskMode.classList.toggle('is-mask-active', appState.viewMode === 'mask');
   ui.undoPoint.disabled = drawEditingDisabled;
   ui.undoCurve.disabled = drawEditingDisabled;
   ui.clearCurves.disabled = appState.running || appState.viewMode === 'mask';
@@ -1068,9 +1076,21 @@ function startStop() {
     clearLayerStack();
   }
 
+  if (timelineStep === 0) {
+    baseResetSnapshot = engine.exportSnapshot();
+  }
   appState.running = true;
   setMode('gradient');
   syncUi();
+}
+
+function pauseForMaskMode() {
+  if (!appState.running) return;
+  appState.running = false;
+  drawLockedAfterPause = true;
+  curves = engine.getCurves();
+  engineReady = true;
+  refreshOverlays();
 }
 
 function setOverlay(point: Vector3 | null, erase: boolean) {
@@ -1200,19 +1220,35 @@ ui.gradientType.addEventListener('change', () => { materialSettings.gradientType
 ui.start.addEventListener('click', () => { pushUndoState(); startStop(); refreshStatus(); syncUi(); });
 ui.reset.addEventListener('click', () => {
   pushUndoState();
+  const currentMaskSnapshot = engineReady ? engine.exportSnapshot() : null;
   drawLockedAfterPause = false;
   appState.running = false;
   setMode('gradient');
 
   if (!engineReady) {
     baseCurves = cloneCurves(curves);
+    baseSubdivision = startSubdivision;
   }
 
   if (baseCurves.length > 0) {
+    startSubdivision = baseSubdivision;
+    ui.startSubdivision.value = `${baseSubdivision}`;
+    ui.startSubdivisionValue.textContent = `${baseSubdivision}`;
+    updateRangeProgress(ui.startSubdivision);
     curves = cloneCurves(baseCurves);
     draft = [];
     engineReady = false;
-    ensureEngine(false);
+    if (ensureEngine(false, baseSubdivision)) {
+      if (baseResetSnapshot) {
+        engine.importSnapshot(baseResetSnapshot);
+      }
+      if (currentMaskSnapshot) {
+        engine.applyMaskFromSnapshot(currentMaskSnapshot, 'max');
+      }
+      engineReady = true;
+      refreshRibbon();
+      resetTimeline();
+    }
   } else {
     engineReady = false;
     clearRibbon();
@@ -1227,18 +1263,32 @@ ui.maskMode.addEventListener('click', () => {
   pushUndoState();
   if (appState.viewMode === 'mask') setMode('gradient');
   else {
-    if (!engineReady) ensureEngine();
-    if (!appState.running) setMode('mask');
+    pauseForMaskMode();
+    if (!engineReady && !ensureEngine()) {
+      syncUi();
+      return;
+    }
+    setMode('mask');
   }
   syncUi();
 });
 ui.blurMask.addEventListener('click', () => {
-  if (!engineReady || appState.running) return;
+  pauseForMaskMode();
+  if (!engineReady && !ensureEngine()) {
+    setMode('mask');
+    syncUi();
+    return;
+  }
   pushUndoState();
   engine.blurMask(FIXED_MASK_BLUR_STRENGTH); refreshRibbon(); setMode('mask'); syncUi();
 });
 ui.clearMask.addEventListener('click', () => {
-  if (!engineReady || appState.running) return;
+  pauseForMaskMode();
+  if (!engineReady && !ensureEngine()) {
+    setMode('mask');
+    syncUi();
+    return;
+  }
   pushUndoState();
   engine.clearMask(); refreshRibbon(); setMode('mask'); syncUi();
 });
@@ -1255,7 +1305,7 @@ ui.undoCurve.addEventListener('click', () => {
 ui.clearCurves.addEventListener('click', () => {
   pushUndoState();
   drawLockedAfterPause = false;
-  curves = []; draft = []; baseCurves = []; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
+  curves = []; draft = []; baseCurves = []; baseResetSnapshot = null; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
 });
 
 ui.exportObj.addEventListener('click', exportObj);
