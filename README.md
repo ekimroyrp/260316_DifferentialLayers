@@ -1,13 +1,22 @@
 # 260316_DifferentialLayers
 
-260316_DifferentialLayers is a graphics-focused project for building and testing differential layer ideas in an interactive scene. The repository is structured so core logic, visual output, and controls can be iterated quickly while keeping setup simple for local development.
+260316_DifferentialLayers is a Three.js interactive differential-growth project focused on 2D user-drawn curves that evolve together as one shared system. You can sketch open/closed curves directly on the XY plane, then run growth with repulsion, cohesion/smoothing, spring-like edge control, adaptive splitting, mask painting, timeline playback, and export outputs.
 
 ## Features
 
-- Differential layer system scaffold (base architecture for layered behavior).
-- Real-time interactive rendering workflow (planned scene loop + updates).
-- Modular project layout for adding simulation, shading, and controls.
-- Expandable input mapping for keyboard/mouse-driven testing.
+- Multi-curve drawing workflow on the XY plane with open-curve (`Enter`) and close-on-start-click behavior.
+- Shared differential-growth engine for all curves with:
+  - resampling to target spacing,
+  - adaptive segment splitting,
+  - global repulsion across curves,
+  - smoothing/cohesion and shape retention,
+  - seeded variation and deterministic snapshots.
+- Mask workflow (paint/erase/blur/clear) applied to curve growth.
+- Reused visual stack from the 3D predecessor:
+  - same panel style/environment look,
+  - bloom + FXAA postprocessing,
+  - gradient/material controls.
+- Timeline scrubbing, undo/redo shortcuts, and export support (`OBJ`, `GLB`, `PNG`).
 
 ## Getting Started
 
@@ -15,16 +24,33 @@
    `git clone https://github.com/ekimroyrp/260316_DifferentialLayers.git`
 2. Enter the project folder:
    `cd 260316_DifferentialLayers`
-3. Add project source files (app entry, renderer, layer logic).
-4. Install dependencies once `package.json` is added:
+3. Install dependencies:
    `npm install`
-5. Run the local dev server (after scripts are defined):
+4. Run development server:
    `npm run dev`
+5. Build production bundle:
+   `npm run build`
+6. Run tests:
+   `npm test`
 
 ## Controls
 
-- `LMB` / pointer drag: orbit or inspect scene (when camera controls are enabled).
-- `W / A / S / D`: move focus or test object (if mapped).
-- `Q / E`: adjust layer parameter up/down (if mapped).
-- `R`: reset simulation state (if mapped).
-- `Space`: pause/resume update loop (if mapped).
+- Drawing:
+  - `LMB`: add curve point
+  - `Enter`: end current curve as open
+  - click near first point while drawing: close curve and end it
+  - next `LMB`: start a new curve
+- Camera:
+  - `RMB`: orbit
+  - `MMB`: pan
+  - `Wheel`: zoom
+- Mask mode:
+  - `LMB`: paint mask
+  - `Shift + LMB`: erase mask
+- Simulation:
+  - `Start/Pause`: run or stop growth
+  - `Reset`: reset simulation state
+  - `Simulation Timeline`: scrub recorded steps (when paused)
+- Editing:
+  - `Ctrl + Z`: undo
+  - `Ctrl + Y` or `Ctrl + Shift + Z`: redo
