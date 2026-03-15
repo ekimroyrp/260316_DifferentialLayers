@@ -4,17 +4,13 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
-  DynamicDrawUsage,
   Group,
-  InstancedMesh,
   LineBasicMaterial,
   LineSegments,
   MOUSE,
   MathUtils,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
-  Object3D,
   PerspectiveCamera,
   Plane,
   Points,
@@ -22,7 +18,6 @@ import {
   Raycaster,
   SRGBColorSpace,
   Scene,
-  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderTarget,
@@ -317,14 +312,17 @@ const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
 }));
 pointsMesh.renderOrder = 30;
 simRoot.add(pointsMesh);
-const clickedPointGeometry = new SphereGeometry(0.016, 8, 8);
-const clickedPointMaterial = new MeshBasicMaterial({ color: 0xffffff });
-let clickedPointCapacity = 1;
-let clickedPointsMesh = new InstancedMesh(clickedPointGeometry, clickedPointMaterial, clickedPointCapacity);
-clickedPointsMesh.frustumCulled = false;
-clickedPointsMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+const clickedPointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
+  color: 0xffffff,
+  size: 18,
+  sizeAttenuation: false,
+  transparent: true,
+  opacity: 1,
+  depthTest: false,
+  depthWrite: false,
+}));
+clickedPointsMesh.renderOrder = 31;
 simRoot.add(clickedPointsMesh);
-const clickedPointDummy = new Object3D();
 
 const engine = new DifferentialGrowthEngine(growthSettings, simulationSettings.seed);
 const previewEngine = new DifferentialGrowthEngine({ ...growthSettings }, simulationSettings.seed);
@@ -367,6 +365,8 @@ let timelineSync = false;
 let painting = false;
 let draggingPanel = false;
 let drawLockedAfterPause = false;
+let showClickedPointsAfterReset = false;
+let clickedPointCount = 0;
 const dragOffset = { x: 0, y: 0 };
 
 const undo: UndoState[] = [];
@@ -684,45 +684,31 @@ function getClickedPointCurves() {
   return curves;
 }
 
-function ensureClickedPointCapacity(required: number) {
-  if (required <= clickedPointCapacity) return;
-  simRoot.remove(clickedPointsMesh);
-  clickedPointsMesh.dispose();
-  clickedPointCapacity = Math.max(required, clickedPointCapacity * 2);
-  clickedPointsMesh = new InstancedMesh(clickedPointGeometry, clickedPointMaterial, clickedPointCapacity);
-  clickedPointsMesh.frustumCulled = false;
-  clickedPointsMesh.instanceMatrix.setUsage(DynamicDrawUsage);
-  simRoot.add(clickedPointsMesh);
-}
-
 function syncClickedPointVisibility() {
-  clickedPointsMesh.visible = !appState.running && appState.viewMode !== 'mask' && clickedPointsMesh.count > 0;
+  const visibleContext = !appState.running && appState.viewMode !== 'mask' && !drawLockedAfterPause;
+  const duringDrawing = draft.length > 0;
+  const atSimulationStart = timelineStep === 0;
+  clickedPointsMesh.visible = visibleContext && (duringDrawing || showClickedPointsAfterReset || atSimulationStart) && clickedPointCount > 0;
 }
 
 function refreshClickedPoints() {
   const authoredCurves = getClickedPointCurves();
-  let total = draft.length;
-  for (const curve of authoredCurves) total += curve.points.length;
-
-  ensureClickedPointCapacity(Math.max(1, total));
-  clickedPointsMesh.count = total;
-
-  let index = 0;
+  const arr: number[] = [];
   for (const curve of authoredCurves) {
     for (const point of curve.points) {
-      clickedPointDummy.position.set(point.x, point.y, 0);
-      clickedPointDummy.updateMatrix();
-      clickedPointsMesh.setMatrixAt(index, clickedPointDummy.matrix);
-      index += 1;
+      arr.push(point.x, point.y, 0);
     }
   }
   for (const point of draft) {
-    clickedPointDummy.position.set(point.x, point.y, 0);
-    clickedPointDummy.updateMatrix();
-    clickedPointsMesh.setMatrixAt(index, clickedPointDummy.matrix);
-    index += 1;
+    arr.push(point.x, point.y, 0);
   }
-  clickedPointsMesh.instanceMatrix.needsUpdate = true;
+
+  const next = new BufferGeometry();
+  next.setAttribute('position', new BufferAttribute(new Float32Array(arr), 3));
+  const prev = clickedPointsMesh.geometry;
+  clickedPointsMesh.geometry = next;
+  prev.dispose();
+  clickedPointCount = arr.length / 3;
   syncClickedPointVisibility();
 }
 
@@ -1079,6 +1065,7 @@ function startStop() {
   if (timelineStep === 0) {
     baseResetSnapshot = engine.exportSnapshot();
   }
+  showClickedPointsAfterReset = false;
   appState.running = true;
   setMode('gradient');
   syncUi();
@@ -1222,6 +1209,7 @@ ui.reset.addEventListener('click', () => {
   pushUndoState();
   const currentMaskSnapshot = engineReady ? engine.exportSnapshot() : null;
   drawLockedAfterPause = false;
+  showClickedPointsAfterReset = false;
   appState.running = false;
   setMode('gradient');
 
@@ -1246,6 +1234,7 @@ ui.reset.addEventListener('click', () => {
         engine.applyMaskFromSnapshot(currentMaskSnapshot, 'max');
       }
       engineReady = true;
+      showClickedPointsAfterReset = true;
       refreshRibbon();
       resetTimeline();
     }
@@ -1305,6 +1294,7 @@ ui.undoCurve.addEventListener('click', () => {
 ui.clearCurves.addEventListener('click', () => {
   pushUndoState();
   drawLockedAfterPause = false;
+  showClickedPointsAfterReset = false;
   curves = []; draft = []; baseCurves = []; baseResetSnapshot = null; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
 });
 
