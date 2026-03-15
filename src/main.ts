@@ -4,13 +4,17 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
+  DynamicDrawUsage,
   Group,
+  InstancedMesh,
   LineBasicMaterial,
   LineSegments,
   MOUSE,
   MathUtils,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   PerspectiveCamera,
   Plane,
   Points,
@@ -18,6 +22,7 @@ import {
   Raycaster,
   SRGBColorSpace,
   Scene,
+  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderTarget,
@@ -67,6 +72,9 @@ type Ui = {
   timeline: HTMLInputElement;
   timelineValue: HTMLSpanElement;
   stackLayers: HTMLInputElement;
+  showMesh: HTMLInputElement;
+  showPath: HTMLInputElement;
+  showPoints: HTMLInputElement;
   seed: HTMLInputElement;
   seedValue: HTMLSpanElement;
   seedInfluence: HTMLInputElement;
@@ -159,6 +167,9 @@ const ui: Ui = {
   timeline: must('simulation-timeline'),
   timelineValue: must('simulation-timeline-value'),
   stackLayers: must('stack-layers'),
+  showMesh: must('show-mesh'),
+  showPath: must('show-path'),
+  showPoints: must('show-points'),
   seed: must('seed-value'),
   seedValue: must('seed-value-label'),
   seedInfluence: must('seed-influence'),
@@ -294,10 +305,28 @@ const layerGroup = new Group();
 simRoot.add(layerGroup);
 const lineMesh = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x2bb2ff, transparent: true, opacity: 0.9 }));
 simRoot.add(lineMesh);
-const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({ color: 0xa8b0c2, size: 6, sizeAttenuation: false }));
+const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
+  color: 0x7fb3ff,
+  size: 9,
+  sizeAttenuation: false,
+  transparent: true,
+  opacity: 0.98,
+  depthTest: false,
+  depthWrite: false,
+}));
+pointsMesh.renderOrder = 30;
 simRoot.add(pointsMesh);
+const clickedPointGeometry = new SphereGeometry(0.016, 8, 8);
+const clickedPointMaterial = new MeshBasicMaterial({ color: 0xffffff });
+let clickedPointCapacity = 1;
+let clickedPointsMesh = new InstancedMesh(clickedPointGeometry, clickedPointMaterial, clickedPointCapacity);
+clickedPointsMesh.frustumCulled = false;
+clickedPointsMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+simRoot.add(clickedPointsMesh);
+const clickedPointDummy = new Object3D();
 
 const engine = new DifferentialGrowthEngine(growthSettings, simulationSettings.seed);
+const previewEngine = new DifferentialGrowthEngine({ ...growthSettings }, simulationSettings.seed);
 engine.setGradientBlur(materialSettings.gradientBlur);
 
 const composerTarget = new WebGLRenderTarget(window.innerWidth, window.innerHeight);
@@ -335,6 +364,7 @@ let timelineStep = 0;
 let timelineSync = false;
 let painting = false;
 let draggingPanel = false;
+let drawLockedAfterPause = false;
 const dragOffset = { x: 0, y: 0 };
 
 const undo: UndoState[] = [];
@@ -371,7 +401,7 @@ function restoreState(state: UndoState) {
     engine.importSnapshot(state.snapshot);
     resetTimeline();
   } else {
-    clearRibbon();
+    refreshRibbon();
     clearTimeline();
   }
   refreshOverlays();
@@ -626,6 +656,74 @@ function isLayerStackEnabled() {
   return ui.stackLayers.checked;
 }
 
+function isMeshDisplayEnabled() {
+  return ui.showMesh.checked;
+}
+
+function isPathDisplayEnabled() {
+  return ui.showPath.checked;
+}
+
+function isPointDisplayEnabled() {
+  return ui.showPoints.checked;
+}
+
+function syncPathVisibility() {
+  lineMesh.visible = isPathDisplayEnabled();
+}
+
+function syncPointVisibility() {
+  pointsMesh.visible = isPointDisplayEnabled();
+}
+
+function getClickedPointCurves() {
+  if (!engineReady) return curves;
+  if (baseCurves.length > 0) return baseCurves;
+  return curves;
+}
+
+function ensureClickedPointCapacity(required: number) {
+  if (required <= clickedPointCapacity) return;
+  simRoot.remove(clickedPointsMesh);
+  clickedPointsMesh.dispose();
+  clickedPointCapacity = Math.max(required, clickedPointCapacity * 2);
+  clickedPointsMesh = new InstancedMesh(clickedPointGeometry, clickedPointMaterial, clickedPointCapacity);
+  clickedPointsMesh.frustumCulled = false;
+  clickedPointsMesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  simRoot.add(clickedPointsMesh);
+}
+
+function syncClickedPointVisibility() {
+  clickedPointsMesh.visible = !appState.running && appState.viewMode !== 'mask' && clickedPointsMesh.count > 0;
+}
+
+function refreshClickedPoints() {
+  const authoredCurves = getClickedPointCurves();
+  let total = draft.length;
+  for (const curve of authoredCurves) total += curve.points.length;
+
+  ensureClickedPointCapacity(Math.max(1, total));
+  clickedPointsMesh.count = total;
+
+  let index = 0;
+  for (const curve of authoredCurves) {
+    for (const point of curve.points) {
+      clickedPointDummy.position.set(point.x, point.y, 0);
+      clickedPointDummy.updateMatrix();
+      clickedPointsMesh.setMatrixAt(index, clickedPointDummy.matrix);
+      index += 1;
+    }
+  }
+  for (const point of draft) {
+    clickedPointDummy.position.set(point.x, point.y, 0);
+    clickedPointDummy.updateMatrix();
+    clickedPointsMesh.setMatrixAt(index, clickedPointDummy.matrix);
+    index += 1;
+  }
+  clickedPointsMesh.instanceMatrix.needsUpdate = true;
+  syncClickedPointVisibility();
+}
+
 function updateLayerHeights() {
   const heightStep = parseFloat(ui.ribbonWidth.value);
   for (let i = 0; i < layerGroup.children.length; i += 1) {
@@ -635,8 +733,9 @@ function updateLayerHeights() {
 
 function syncLayerVisibility() {
   const showStack = isLayerStackEnabled() && layerGroup.children.length > 0 && (appState.running || timeline.length > 1) && appState.viewMode !== 'mask';
-  layerGroup.visible = showStack;
-  ribbonMesh.visible = !showStack;
+  const showMesh = isMeshDisplayEnabled();
+  layerGroup.visible = showMesh && showStack;
+  ribbonMesh.visible = showMesh && !showStack;
 }
 
 function pushCurrentLayer() {
@@ -773,8 +872,26 @@ function ensureEngine(setBase = true): boolean {
 }
 
 function refreshRibbon() {
-  if (!engineReady) return clearRibbon();
-  const next = engine.getRibbonGeometry(parseFloat(ui.ribbonWidth.value));
+  let next: BufferGeometry | null = null;
+  if (engineReady) {
+    next = engine.getRibbonGeometry(parseFloat(ui.ribbonWidth.value));
+  } else {
+    const previewCurves = buildPreviewRibbonCurves();
+    if (previewCurves.length === 0) {
+      clearRibbon();
+      return;
+    }
+    previewEngine.reseed(simulationSettings.seed);
+    previewEngine.setGrowthSettings(growthSettings);
+    previewEngine.setGradientBlur(materialSettings.gradientBlur);
+    previewEngine.setCurves(previewCurves, growthSettings.targetEdgeLength);
+    next = previewEngine.getRibbonGeometry(parseFloat(ui.ribbonWidth.value));
+  }
+
+  if (!next) {
+    clearRibbon();
+    return;
+  }
   const prev = ribbonMesh.geometry;
   ribbonMesh.geometry = next;
   prev.dispose();
@@ -788,12 +905,49 @@ function clearRibbon() {
   syncLayerVisibility();
 }
 
-function buildLineGeometry(): BufferGeometry {
+function getOverlayCurves() {
+  if (appState.running && engineReady) return engine.getCurves();
+  return curves;
+}
+
+function buildPreviewRibbonCurves() {
+  const previewCurves: CurveData[] = curves.map((curve) => ({
+    id: curve.id,
+    closed: curve.closed,
+    points: buildSubdividedCurve(curve.points, curve.closed, startSubdivision).map((point) => ({
+      x: point.x,
+      y: point.y,
+      z: point.z ?? 0,
+    })),
+  }));
+
+  if (draft.length >= 2) {
+    previewCurves.push({
+      id: -1,
+      closed: false,
+      points: buildSubdividedCurve(draft, false, startSubdivision).map((point) => ({
+        x: point.x,
+        y: point.y,
+        z: point.z ?? 0,
+      })),
+    });
+  }
+
+  return previewCurves;
+}
+
+function getPreviewCurvePoints(curve: CurveData) {
+  if (appState.running) return curve.points;
+  return buildSubdividedCurve(curve.points, curve.closed, startSubdivision);
+}
+
+function buildLineGeometry(sourceCurves: CurveData[]): BufferGeometry {
   const arr: number[] = [];
-  const seg = (a: CurvePoint, b: CurvePoint) => arr.push(a.x, a.y, 0, b.x, b.y, 0);
-  for (const c of curves) {
-    const limit = c.closed ? c.points.length : c.points.length - 1;
-    for (let i = 0; i < limit; i += 1) seg(c.points[i], c.points[(i + 1) % c.points.length]);
+  const seg = (a: { x: number; y: number }, b: { x: number; y: number }) => arr.push(a.x, a.y, 0, b.x, b.y, 0);
+  for (const c of sourceCurves) {
+    const previewPoints = getPreviewCurvePoints(c);
+    const limit = c.closed ? previewPoints.length : previewPoints.length - 1;
+    for (let i = 0; i < limit; i += 1) seg(previewPoints[i], previewPoints[(i + 1) % previewPoints.length]);
   }
   for (let i = 0; i < draft.length - 1; i += 1) seg(draft[i], draft[i + 1]);
   const g = new BufferGeometry();
@@ -801,9 +955,12 @@ function buildLineGeometry(): BufferGeometry {
   return g;
 }
 
-function buildPointGeometry(): BufferGeometry {
+function buildPointGeometry(sourceCurves: CurveData[]): BufferGeometry {
   const arr: number[] = [];
-  for (const c of curves) for (const p of c.points) arr.push(p.x, p.y, 0);
+  for (const c of sourceCurves) {
+    const previewPoints = getPreviewCurvePoints(c);
+    for (const p of previewPoints) arr.push(p.x, p.y, 0);
+  }
   for (const p of draft) arr.push(p.x, p.y, 0);
   const g = new BufferGeometry();
   g.setAttribute('position', new BufferAttribute(new Float32Array(arr), 3));
@@ -811,27 +968,36 @@ function buildPointGeometry(): BufferGeometry {
 }
 
 function refreshOverlays() {
-  const l = buildLineGeometry(); const p = buildPointGeometry();
+  const overlayCurves = getOverlayCurves();
+  const l = buildLineGeometry(overlayCurves);
+  const p = buildPointGeometry(overlayCurves);
   lineMesh.geometry.dispose(); pointsMesh.geometry.dispose();
   lineMesh.geometry = l; pointsMesh.geometry = p;
-  lineMesh.visible = !appState.running; pointsMesh.visible = !appState.running;
+  syncPathVisibility();
+  syncPointVisibility();
+  refreshClickedPoints();
 }
 
 function refreshStatus() {
   if (appState.viewMode === 'mask') ui.drawStatus.textContent = 'Mask mode active. LMB paint, Shift+LMB erase.';
   else if (appState.running) ui.drawStatus.textContent = `Simulation running. Curves: ${curves.length}`;
+  else if (drawLockedAfterPause) ui.drawStatus.textContent = 'Drawing paused. Reset or Clear All to draw again.';
   else if (draft.length > 0) ui.drawStatus.textContent = `Drawing curve (${draft.length} points). Enter to end.`;
   else ui.drawStatus.textContent = curves.length ? `Curves ready: ${curves.length}. Click to add another.` : 'Click to start a curve.';
 }
 
 function syncUi() {
+  const drawEditingDisabled = appState.running || appState.viewMode === 'mask' || drawLockedAfterPause;
   ui.start.textContent = appState.running ? 'Pause' : 'Start';
   ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
-  ui.undoPoint.disabled = appState.running || appState.viewMode === 'mask';
-  ui.undoCurve.disabled = appState.running || appState.viewMode === 'mask';
+  ui.undoPoint.disabled = drawEditingDisabled;
+  ui.undoCurve.disabled = drawEditingDisabled;
   ui.clearCurves.disabled = appState.running || appState.viewMode === 'mask';
   syncTimeline();
   syncLayerVisibility();
+  syncPathVisibility();
+  syncPointVisibility();
+  syncClickedPointVisibility();
 }
 
 function setMode(mode: ViewMode) {
@@ -842,6 +1008,7 @@ function setMode(mode: ViewMode) {
 }
 
 function addPoint(point: Vector3, event: PointerEvent) {
+  if (drawLockedAfterPause) return;
   if (draft.length >= 2) {
     const startScreen = worldToScreen(draft[0]);
     if (isWithinCloseThreshold(startScreen, new Vector2(event.clientX, event.clientY), CLOSE_THRESHOLD_PX)) {
@@ -857,6 +1024,7 @@ function addPoint(point: Vector3, event: PointerEvent) {
   draft.push({ x: point.x, y: point.y, z: 0 });
   engineReady = false;
   clearTimeline();
+  refreshRibbon();
   refreshOverlays();
   refreshStatus();
 }
@@ -868,6 +1036,7 @@ function finalizeDraft(closed: boolean): boolean {
   draft = [];
   engineReady = false;
   clearTimeline();
+  refreshRibbon();
   refreshOverlays();
   refreshStatus();
   return true;
@@ -876,6 +1045,7 @@ function finalizeDraft(closed: boolean): boolean {
 function startStop() {
   if (appState.running) {
     appState.running = false;
+    drawLockedAfterPause = true;
     curves = engine.getCurves();
     engineReady = true;
     refreshOverlays();
@@ -989,8 +1159,15 @@ function exportPng() {
 }
 
 bindRange(ui.startSubdivision, ui.startSubdivisionValue, (v) => `${Math.round(v)}`, (v) => {
-  startSubdivision = Math.max(1, Math.round(v));
+  const nextSubdivision = Math.max(1, Math.round(v));
+  if (nextSubdivision === startSubdivision) return;
+  startSubdivision = nextSubdivision;
   engineReady = false;
+  clearTimeline();
+  refreshRibbon();
+  refreshOverlays();
+  refreshStatus();
+  syncUi();
 });
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (v) => v.toFixed(2), (v) => { simulationSettings.growthSpeed = v; });
 bindRange(ui.seed, ui.seedValue, (v) => `${Math.round(v)}`, (v) => { simulationSettings.seed = Math.round(v); engineReady = false; });
@@ -1023,6 +1200,7 @@ ui.gradientType.addEventListener('change', () => { materialSettings.gradientType
 ui.start.addEventListener('click', () => { pushUndoState(); startStop(); refreshStatus(); syncUi(); });
 ui.reset.addEventListener('click', () => {
   pushUndoState();
+  drawLockedAfterPause = false;
   appState.running = false;
   setMode('gradient');
 
@@ -1067,15 +1245,16 @@ ui.clearMask.addEventListener('click', () => {
 ui.undoPoint.addEventListener('click', () => {
   pushUndoState();
   if (draft.length > 0) draft.pop(); else if (curves.length) { const c = curves[curves.length - 1]; if (c.points.length > 2) c.points.pop(); else curves.pop(); }
-  engineReady = false; clearTimeline(); refreshOverlays(); refreshStatus();
+  engineReady = false; clearTimeline(); refreshRibbon(); refreshOverlays(); refreshStatus();
 });
 ui.undoCurve.addEventListener('click', () => {
   pushUndoState();
   if (draft.length) draft = []; else curves.pop();
-  engineReady = false; clearTimeline(); refreshOverlays(); refreshStatus();
+  engineReady = false; clearTimeline(); refreshRibbon(); refreshOverlays(); refreshStatus();
 });
 ui.clearCurves.addEventListener('click', () => {
   pushUndoState();
+  drawLockedAfterPause = false;
   curves = []; draft = []; baseCurves = []; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
 });
 
@@ -1117,6 +1296,18 @@ ui.stackLayers.addEventListener('change', () => {
   syncUi();
 });
 
+ui.showMesh.addEventListener('change', () => {
+  syncUi();
+});
+
+ui.showPath.addEventListener('change', () => {
+  syncUi();
+});
+
+ui.showPoints.addEventListener('change', () => {
+  syncUi();
+});
+
 ui.collapseToggle.addEventListener('pointerdown', (event) => event.stopPropagation());
 ui.collapseToggle.addEventListener('click', () => {
   const collapsed = ui.panel.classList.toggle('is-collapsed');
@@ -1147,7 +1338,10 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     setOverlay(point, event.shiftKey);
     return;
   }
-  if (appState.running || appState.viewMode === 'mask') return;
+  if (appState.running || appState.viewMode === 'mask' || drawLockedAfterPause) {
+    refreshStatus();
+    return;
+  }
   pushUndoState();
   addPoint(point, event);
 });
@@ -1173,7 +1367,7 @@ window.addEventListener('keydown', (event) => {
   const mod = event.ctrlKey || event.metaKey;
   if (mod && !event.shiftKey && event.key.toLowerCase() === 'z') { event.preventDefault(); undoStep(); return; }
   if (mod && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); redoStep(); return; }
-  if (event.key === 'Enter' && !appState.running && appState.viewMode !== 'mask') { pushUndoState(); finalizeDraft(false); }
+  if (event.key === 'Enter' && !appState.running && appState.viewMode !== 'mask' && !drawLockedAfterPause) { pushUndoState(); finalizeDraft(false); }
 });
 
 window.addEventListener('resize', () => {
@@ -1193,6 +1387,7 @@ renderer.setAnimationLoop((now) => {
     engine.step(dt, simulationSettings.growthSpeed, simulationSettings.seedInfluence);
     refreshRibbon();
     appendTimeline();
+    refreshOverlays();
   }
   composer.render();
 });

@@ -1,16 +1,18 @@
 # 260316_DifferentialLayers
 
-260316_DifferentialLayers is a Three.js interactive differential-growth project focused on 2D user-drawn curves that evolve together as one shared system. You sketch open/closed curves directly on the ground plane, then run growth with repulsion, cohesion/smoothing, spring-like edge control, adaptive splitting, mask painting, timeline playback, and export outputs.
+260316_DifferentialLayers is a Three.js interactive differential-growth project focused on 2D user-drawn curves that evolve together as one shared system. You sketch open/closed curves directly on the ground plane, preview them as ribbon geometry, then run growth with repulsion, iteration smoothing, edge-length control, adaptive splitting, mask painting, timeline playback, and export outputs.
 
 ## Features
 
 - Multi-curve drawing workflow on the ground plane with open-curve (`Enter`) and close-on-start-click behavior.
+- Live `Start Subdivision` preview updates while dragging, including path line and point overlays.
+- Live draw-time ribbon preview before simulation starts.
 - Shared differential-growth engine for all curves with:
   - resampling to target spacing,
   - adaptive segment splitting,
   - global repulsion across curves,
   - point-to-segment self-collision repulsion to reduce curve overlaps/intersections,
-  - smoothing/cohesion and shape retention,
+  - iteration smoothing and shape retention,
   - side-bias control to favor either side of the drawn median curve,
   - seeded variation and deterministic snapshots.
 - Mask workflow (paint/erase/blur/clear) applied to curve growth.
@@ -23,6 +25,12 @@
 - `Stack Layers` simulation toggle:
   - Off (default): classic single-layer simulation view.
   - On: each iteration is stacked upward, with vertical spacing equal to Ribbon Width.
+- Draw visibility toggles:
+  - `Show Mesh` (default on): show/hide ribbon mesh.
+  - `Show Path` (default off): show/hide curve path overlay.
+  - `Show Points` (default off): show/hide growth points overlay.
+- Clicked authoring points are displayed as white sphere markers to distinguish them from growth points.
+- Paused draw lock: after pausing simulation, drawing is blocked until `Reset` or `Clear All`.
 
 ## Getting Started
 
@@ -46,6 +54,7 @@
   - `Enter`: end current curve as open
   - click near first point while drawing: close curve and end it
   - next `LMB`: start a new curve
+  - after `Pause`: drawing is locked until `Reset` or `Clear All`
 - Camera:
   - `RMB`: orbit
   - `MMB`: pan
@@ -57,6 +66,10 @@
   - `Start/Pause`: run or stop growth
   - `Reset`: reset simulation state
   - `Simulation Timeline`: scrub recorded steps (when paused)
+- Visibility:
+  - `Show Mesh`: toggle ribbon mesh visibility
+  - `Show Path`: toggle path/curve overlay visibility
+  - `Show Points`: toggle growth points overlay visibility
 - Editing:
   - `Ctrl + Z`: undo
   - `Ctrl + Y` or `Ctrl + Shift + Z`: redo
