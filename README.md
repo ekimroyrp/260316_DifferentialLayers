@@ -20,6 +20,9 @@
   - gradient/material controls.
 - Infinite fading ground grid (ShoeShaper-style) integrated into the scene.
 - Timeline scrubbing, undo/redo shortcuts, and export support (`OBJ`, `GLB`, `PNG`).
+- `Stack Layers` simulation toggle:
+  - Off (default): classic single-layer simulation view.
+  - On: each iteration is stacked upward, with vertical spacing equal to Ribbon Width.
 
 ## Getting Started
 

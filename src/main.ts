@@ -66,6 +66,7 @@ type Ui = {
   growthSpeedValue: HTMLSpanElement;
   timeline: HTMLInputElement;
   timelineValue: HTMLSpanElement;
+  stackLayers: HTMLInputElement;
   seed: HTMLInputElement;
   seedValue: HTMLSpanElement;
   seedInfluence: HTMLInputElement;
@@ -157,6 +158,7 @@ const ui: Ui = {
   growthSpeedValue: must('growth-speed-value'),
   timeline: must('simulation-timeline'),
   timelineValue: must('simulation-timeline-value'),
+  stackLayers: must('stack-layers'),
   seed: must('seed-value'),
   seedValue: must('seed-value-label'),
   seedInfluence: must('seed-influence'),
@@ -288,6 +290,8 @@ simRoot.rotation.x = -Math.PI / 2;
 scene.add(simRoot);
 const ribbonMesh = new Mesh(new BufferGeometry(), materialController.material);
 simRoot.add(ribbonMesh);
+const layerGroup = new Group();
+simRoot.add(layerGroup);
 const lineMesh = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x2bb2ff, transparent: true, opacity: 0.9 }));
 simRoot.add(lineMesh);
 const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({ color: 0xa8b0c2, size: 6, sizeAttenuation: false }));
@@ -605,9 +609,72 @@ function clampPanelToViewport() {
   ui.panel.style.right = 'auto';
 }
 
+function removeLayerAt(index: number) {
+  const child = layerGroup.children[index];
+  if (!child) return;
+  if (child instanceof Mesh) child.geometry.dispose();
+  layerGroup.remove(child);
+}
+
+function clearLayerStack() {
+  for (let i = layerGroup.children.length - 1; i >= 0; i -= 1) {
+    removeLayerAt(i);
+  }
+}
+
+function isLayerStackEnabled() {
+  return ui.stackLayers.checked;
+}
+
+function updateLayerHeights() {
+  const heightStep = parseFloat(ui.ribbonWidth.value);
+  for (let i = 0; i < layerGroup.children.length; i += 1) {
+    layerGroup.children[i].position.set(0, 0, i * heightStep);
+  }
+}
+
+function syncLayerVisibility() {
+  const showStack = isLayerStackEnabled() && layerGroup.children.length > 0 && (appState.running || timeline.length > 1) && appState.viewMode !== 'mask';
+  layerGroup.visible = showStack;
+  ribbonMesh.visible = !showStack;
+}
+
+function pushCurrentLayer() {
+  if (!engineReady) return;
+  const layerMesh = new Mesh(ribbonMesh.geometry.clone(), materialController.material);
+  layerMesh.frustumCulled = false;
+  layerGroup.add(layerMesh);
+  updateLayerHeights();
+  syncLayerVisibility();
+}
+
+function rebuildLayerStack(maxIndex = timeline.length - 1) {
+  clearLayerStack();
+  if (!engineReady || timeline.length === 0 || maxIndex < 0) {
+    syncLayerVisibility();
+    return;
+  }
+
+  const saved = engine.exportSnapshot();
+  const safeMax = Math.min(maxIndex, timeline.length - 1);
+  const ribbonWidth = parseFloat(ui.ribbonWidth.value);
+
+  for (let i = 0; i <= safeMax; i += 1) {
+    engine.importSnapshot(timeline[i].snapshot);
+    const layerMesh = new Mesh(engine.getRibbonGeometry(ribbonWidth), materialController.material);
+    layerMesh.frustumCulled = false;
+    layerGroup.add(layerMesh);
+  }
+
+  engine.importSnapshot(saved);
+  updateLayerHeights();
+  syncLayerVisibility();
+}
+
 function clearTimeline() {
   timeline.length = 0;
   timelineStep = 0;
+  clearLayerStack();
   syncTimeline();
 }
 
@@ -615,6 +682,7 @@ function resetTimeline() {
   timeline.length = 0;
   timelineStep = 0;
   if (engineReady) timeline.push({ step: 0, snapshot: engine.exportSnapshot() });
+  clearLayerStack();
   syncTimeline();
 }
 
@@ -633,10 +701,24 @@ function syncTimeline() {
   timelineSync = false;
 }
 
+function findTimelineIndexByStep(step: number) {
+  for (let i = 0; i < timeline.length; i += 1) {
+    if (timeline[i].step === step) return i;
+  }
+  return -1;
+}
+
 function appendTimeline() {
   timelineStep += 1;
   timeline.push({ step: timelineStep, snapshot: engine.exportSnapshot() });
-  if (timeline.length > MAX_TIMELINE) timeline.shift();
+  if (isLayerStackEnabled()) pushCurrentLayer();
+  if (timeline.length > MAX_TIMELINE) {
+    timeline.shift();
+    if (isLayerStackEnabled()) {
+      removeLayerAt(0);
+      updateLayerHeights();
+    }
+  }
   syncTimeline();
 }
 
@@ -696,12 +778,14 @@ function refreshRibbon() {
   const prev = ribbonMesh.geometry;
   ribbonMesh.geometry = next;
   prev.dispose();
+  syncLayerVisibility();
 }
 
 function clearRibbon() {
   const prev = ribbonMesh.geometry;
   ribbonMesh.geometry = new BufferGeometry();
   prev.dispose();
+  syncLayerVisibility();
 }
 
 function buildLineGeometry(): BufferGeometry {
@@ -747,11 +831,13 @@ function syncUi() {
   ui.undoCurve.disabled = appState.running || appState.viewMode === 'mask';
   ui.clearCurves.disabled = appState.running || appState.viewMode === 'mask';
   syncTimeline();
+  syncLayerVisibility();
 }
 
 function setMode(mode: ViewMode) {
   appState.viewMode = mode;
   materialController.setViewMode(mode);
+  syncLayerVisibility();
   refreshStatus();
 }
 
@@ -797,6 +883,21 @@ function startStop() {
   }
   if (draft.length >= 2) finalizeDraft(false);
   if (!engineReady && !ensureEngine()) return;
+
+  if (isLayerStackEnabled()) {
+    const currentIndex = findTimelineIndexByStep(timelineStep);
+    if (currentIndex >= 0 && currentIndex < timeline.length - 1) {
+      timeline.splice(currentIndex + 1);
+      while (layerGroup.children.length > currentIndex + 1) {
+        removeLayerAt(layerGroup.children.length - 1);
+      }
+      updateLayerHeights();
+    }
+    if (layerGroup.children.length === 0) pushCurrentLayer();
+  } else {
+    clearLayerStack();
+  }
+
   appState.running = true;
   setMode('gradient');
   syncUi();
@@ -904,7 +1005,10 @@ bindRange(ui.smoothing, ui.smoothingValue, (v) => v.toFixed(2), (v) => { growthS
 bindRange(ui.shapeRetention, ui.shapeRetentionValue, (v) => v.toFixed(2), (v) => { growthSettings.shapeRetention = v; engine.setGrowthSettings(growthSettings); });
 bindRange(ui.sideBias, ui.sideBiasValue, (v) => `${Math.round(v)}`, (v) => { growthSettings.sideBias = Math.max(-100, Math.min(100, Math.round(v))); engine.setGrowthSettings(growthSettings); });
 bindRange(ui.maxVertices, ui.maxVerticesValue, (v) => `${Math.round(v)}`, (v) => { growthSettings.maxVertices = Math.round(v); engine.setGrowthSettings(growthSettings); });
-bindRange(ui.ribbonWidth, ui.ribbonWidthValue, (v) => v.toFixed(3), () => { refreshRibbon(); });
+bindRange(ui.ribbonWidth, ui.ribbonWidthValue, (v) => v.toFixed(3), () => {
+  refreshRibbon();
+  if (isLayerStackEnabled()) rebuildLayerStack(findTimelineIndexByStep(timelineStep));
+});
 bindRange(ui.curvatureContrast, ui.curvatureContrastValue, (v) => v.toFixed(2), (v) => { materialSettings.curvatureContrast = v; materialController.setMaterialSettings(materialSettings); });
 bindRange(ui.curvatureBias, ui.curvatureBiasValue, (v) => v.toFixed(2), (v) => { materialSettings.curvatureBias = v; materialController.setMaterialSettings(materialSettings); });
 bindRange(ui.gradientBlur, ui.gradientBlurValue, (v) => v.toFixed(2), (v) => { materialSettings.gradientBlur = v; engine.setGradientBlur(v); });
@@ -983,10 +1087,34 @@ ui.timeline.addEventListener('input', () => {
   updateRangeProgress(ui.timeline);
   if (timelineSync || appState.running || timeline.length === 0) return;
   const step = Math.round(parseFloat(ui.timeline.value));
-  let best = timeline[0]; let dist = Math.abs(best.step - step);
-  for (let i = 1; i < timeline.length; i += 1) { const d = Math.abs(timeline[i].step - step); if (d < dist) { dist = d; best = timeline[i]; } }
-  engine.importSnapshot(best.snapshot); engineReady = true; appState.running = false; timelineStep = best.step; curves = engine.getCurves();
-  refreshRibbon(); refreshOverlays(); syncUi(); refreshStatus();
+  let bestIndex = 0;
+  let best = timeline[0];
+  let dist = Math.abs(best.step - step);
+  for (let i = 1; i < timeline.length; i += 1) {
+    const d = Math.abs(timeline[i].step - step);
+    if (d < dist) {
+      dist = d;
+      best = timeline[i];
+      bestIndex = i;
+    }
+  }
+  engine.importSnapshot(best.snapshot);
+  engineReady = true;
+  appState.running = false;
+  timelineStep = best.step;
+  curves = engine.getCurves();
+  refreshRibbon();
+  if (isLayerStackEnabled()) rebuildLayerStack(bestIndex);
+  else clearLayerStack();
+  refreshOverlays();
+  syncUi();
+  refreshStatus();
+});
+
+ui.stackLayers.addEventListener('change', () => {
+  if (isLayerStackEnabled()) rebuildLayerStack(findTimelineIndexByStep(timelineStep));
+  else clearLayerStack();
+  syncUi();
 });
 
 ui.collapseToggle.addEventListener('pointerdown', (event) => event.stopPropagation());
