@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>260316_DifferentialLayers</title>
+    <style>
+      #ui-panel {
+        visibility: hidden;
+        opacity: 0;
+      }
+
+      html.ui-ready #ui-panel {
+        visibility: visible;
+        opacity: 1;
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-CdqMlVtN.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/three-core-CzqpXnrg.js">
+    <link rel="modulepreload" crossorigin href="./assets/three-extras-CHjbbqQd.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-C9Wjrlkk.css">
+  </head>
+  <body>
+    <svg id="brush-overlay" aria-hidden="true">
+      <circle id="brush-circle" />
+      <circle id="falloff-circle" />
+      <circle id="brush-dot" />
+    </svg>
+
+    <div id="ui-panel" class="apple-panel">
+      <div id="ui-handle" class="panel-drag-handle">
+        <button
+          type="button"
+          id="collapse-toggle"
+          class="collapse-button panel-collapse-toggle"
+          aria-label="Collapse controls"
+          aria-expanded="true"
+        >
+          <span class="collapse-icon" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="ui-body panel-sections">
+        <div class="control-hint">Wheel = Zoom, MMB = Pan, RMB = Orbit</div>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Simulation</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control control-grid-2">
+              <button type="button" id="start-sim" class="pill-button control-button-wide">Start</button>
+              <button type="button" id="reset-sim" class="pill-button control-button-wide">Reset</button>
+            </div>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Simulation Timeline</span>
+                <span id="simulation-timeline-value">0</span>
+              </div>
+              <input type="range" id="simulation-timeline" min="0" max="0" step="1" value="0" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Simulation Rate</span>
+                <span id="growth-speed-value">1.00</span>
+              </div>
+              <input type="range" id="growth-speed" min="0.1" max="3" step="0.01" value="1" />
+            </label>
+
+            <div class="control control-grid-2">
+              <label class="control compact toggle-control" for="stack-layers">
+                <span>Stack Layers</span>
+                <input type="checkbox" id="stack-layers" />
+              </label>
+              <label class="control compact toggle-control" for="flip-stack">
+                <span>Flip Stack</span>
+                <input type="checkbox" id="flip-stack" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Path</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control-hint">
+              LMB = Draw Path<br />
+              Enter = Finish Path<br />
+              Connect to Start = Finish Path<br />
+              Shift+LMB on Path = Delete Path<br />
+              LMB on Path = Add Point<br />
+              Shift+LMB on Point = Delete Point<br />
+              LMB+Drag on Point = Move Point
+            </div>
+            <label class="control">
+              <div class="control-row">
+                <span>Start Subdivision</span>
+                <span id="start-subdivision-value">1</span>
+              </div>
+              <input type="range" id="start-subdivision" min="1" max="12" step="1" value="1" />
+            </label>
+            <label class="control">
+              <div class="control-row">
+                <span>Path Thickness</span>
+                <span id="ribbon-width-value">0.038</span>
+              </div>
+              <input type="range" id="ribbon-width" min="0.01" max="0.2" step="0.002" value="0.038" />
+            </label>
+            <div class="control control-grid-3">
+              <label class="control compact toggle-control" for="show-mesh">
+                <span>Show Mesh</span>
+                <input type="checkbox" id="show-mesh" checked />
+              </label>
+              <label class="control compact toggle-control" for="show-path">
+                <span>Show Curve</span>
+                <input type="checkbox" id="show-path" />
+              </label>
+              <label class="control compact toggle-control" for="show-points">
+                <span>Show Points</span>
+                <input type="checkbox" id="show-points" />
+              </label>
+            </div>
+            <div class="control control-grid-2">
+              <button type="button" id="reset-subdivision" class="pill-button control-button-wide">Reset Subdivision</button>
+              <button type="button" id="clear-curves" class="pill-button control-button-wide">Delete<br />All Paths</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Mask</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control-hint">LMB = Paint Mask, Shift+LMB = Erase Mask</div>
+            <div class="control">
+              <button type="button" id="mask-mode" class="pill-button control-button-wide">Enter Mask Mode</button>
+            </div>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Brush Radius</span>
+                <span id="brush-radius-value">0.12</span>
+              </div>
+              <input type="range" id="brush-radius" min="0.01" max="0.5" step="0.005" value="0.12" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Falloff Offset</span>
+                <span id="falloff-offset-value">0.08</span>
+              </div>
+              <input type="range" id="falloff-offset" min="0" max="0.5" step="0.005" value="0.08" />
+            </label>
+
+            <div class="control control-grid-2">
+              <button type="button" id="blur-mask" class="pill-button control-button-wide">Blur Mask</button>
+              <button type="button" id="clear-mask" class="pill-button control-button-wide">Clear Mask</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Growth</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Step</span>
+                <span id="growth-step-value">1.33</span>
+              </div>
+              <input type="range" id="growth-step" min="0.05" max="2" step="0.01" value="1.33" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Seed</span>
+                <span id="seed-value-label">520671</span>
+              </div>
+              <input type="range" id="seed-value" min="0" max="999999" step="1" value="520671" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Jitter</span>
+                <span id="seed-influence-value">0.62</span>
+              </div>
+              <input type="range" id="seed-influence" min="0" max="1" step="0.01" value="0.62" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Target Edge Length</span>
+                <span id="target-edge-length-value">0.060</span>
+              </div>
+              <input type="range" id="target-edge-length" min="0.02" max="0.3" step="0.005" value="0.060" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Split Threshold</span>
+                <span id="split-threshold-value">1.35</span>
+              </div>
+              <input type="range" id="split-threshold" min="1.1" max="2.5" step="0.01" value="1.35" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Repulsion Force</span>
+                <span id="repulsion-value">0.68</span>
+              </div>
+              <input type="range" id="repulsion" min="0" max="1" step="0.01" value="0.68" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Shape Retention</span>
+                <span id="shape-retention-value">0.10</span>
+              </div>
+              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0.10" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Max Vertices</span>
+                <span id="max-vertices-value">50000</span>
+              </div>
+              <input type="range" id="max-vertices" min="5000" max="120000" step="1000" value="50000" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Iteration Smoothing</span>
+                <span id="smoothing-value">0.14</span>
+              </div>
+              <input type="range" id="smoothing" min="0" max="1" step="0.01" value="0.14" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Side Bias</span>
+                <span id="side-bias-value">0</span>
+              </div>
+              <input type="range" id="side-bias" min="-100" max="100" step="1" value="0" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Material</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <label class="control select-control">
+              <div class="control-row">
+                <span>Gradient Type</span>
+              </div>
+              <span class="select-shell">
+                <select id="gradient-type">
+                  <option value="displacement" selected>Displacement</option>
+                  <option value="curvature">Curvature</option>
+                </select>
+              </span>
+            </label>
+
+            <div class="control control-grid-2">
+              <label class="control compact">
+                <div class="control-row">
+                  <span>Gradient Start</span>
+                </div>
+            <input type="color" id="gradient-start-color" class="color-picker" value="#c800ff" />
+              </label>
+              <label class="control compact">
+                <div class="control-row">
+                  <span>Gradient End</span>
+                </div>
+            <input type="color" id="gradient-end-color" class="color-picker" value="#00ff1e" />
+              </label>
+            </div>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Gradient Contrast</span>
+                <span id="curvature-contrast-value">1.40</span>
+              </div>
+              <input type="range" id="curvature-contrast" min="0.2" max="3" step="0.01" value="1.4" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Gradient Bias</span>
+                <span id="curvature-bias-value">-0.40</span>
+              </div>
+              <input type="range" id="curvature-bias" min="-1" max="1" step="0.01" value="-0.4" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Gradient Blur</span>
+                <span id="gradient-blur-value">0.35</span>
+              </div>
+              <input type="range" id="gradient-blur" min="0" max="1" step="0.01" value="0.35" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Fresnel</span>
+                <span id="fresnel-value">0.05</span>
+              </div>
+              <input type="range" id="fresnel" min="0" max="2" step="0.01" value="0.05" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Specular</span>
+                <span id="specular-value">0.60</span>
+              </div>
+              <input type="range" id="specular" min="0" max="2" step="0.01" value="0.6" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Bloom</span>
+                <span id="bloom-value">0.05</span>
+              </div>
+              <input type="range" id="bloom" min="0" max="2" step="0.01" value="0.05" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Export</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control">
+              <button type="button" id="export-obj" class="pill-button control-button-wide">Export OBJ</button>
+            </div>
+            <div class="control">
+              <button type="button" id="export-glb" class="pill-button control-button-wide">Export GLB</button>
+            </div>
+            <div class="control">
+              <button type="button" id="export-screenshot" class="pill-button control-button-wide">Export Screenshot</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div id="ui-handle-bottom"></div>
+    </div>
+
+    <canvas id="app-canvas"></canvas>
+  </body>
+</html>
