@@ -131,9 +131,11 @@ type UndoState = {
 type EditableControlPointRef =
   | { source: 'curve'; curveIndex: number; pointIndex: number }
   | { source: 'draft'; pointIndex: number };
+type CurveInsertTarget = { curveIndex: number; segmentIndex: number };
 
 const CLOSE_THRESHOLD_PX = 16;
 const EDIT_POINT_HIT_THRESHOLD_PX = 16;
+const INSERT_POINT_HIT_THRESHOLD_PX = 12;
 const FIXED_MASK_BLUR_STRENGTH = 0.35;
 const MAX_TIMELINE = 240;
 const MAX_UNDO = 80;
@@ -972,6 +974,80 @@ function moveActiveControlPoint(worldPoint: Vector3) {
   refreshStatus();
 }
 
+function segmentPointDistanceSq(ax: number, ay: number, bx: number, by: number, px: number, py: number) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const lenSq = vx * vx + vy * vy;
+  if (lenSq <= 1e-8) {
+    const dx = px - ax;
+    const dy = py - ay;
+    return dx * dx + dy * dy;
+  }
+  const t = MathUtils.clamp(((px - ax) * vx + (py - ay) * vy) / lenSq, 0, 1);
+  const cx = ax + vx * t;
+  const cy = ay + vy * t;
+  const dx = px - cx;
+  const dy = py - cy;
+  return dx * dx + dy * dy;
+}
+
+function projectPointToSegment2d(ax: number, ay: number, bx: number, by: number, px: number, py: number) {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const lenSq = vx * vx + vy * vy;
+  if (lenSq <= 1e-8) return { x: ax, y: ay };
+  const t = MathUtils.clamp(((px - ax) * vx + (py - ay) * vy) / lenSq, 0, 1);
+  return { x: ax + vx * t, y: ay + vy * t };
+}
+
+function findCurveInsertTarget(pointerPos: Vector2): CurveInsertTarget | null {
+  if (!canEditControlPoints() || draft.length > 0 || curves.length === 0) return null;
+
+  let best: CurveInsertTarget | null = null;
+  let bestDistanceSq = INSERT_POINT_HIT_THRESHOLD_PX * INSERT_POINT_HIT_THRESHOLD_PX;
+
+  for (let curveIndex = 0; curveIndex < curves.length; curveIndex += 1) {
+    const curve = curves[curveIndex];
+    const pointCount = curve.points.length;
+    if (pointCount < 2) continue;
+    const segmentLimit = curve.closed ? pointCount : pointCount - 1;
+    for (let segmentIndex = 0; segmentIndex < segmentLimit; segmentIndex += 1) {
+      const a = curve.points[segmentIndex];
+      const b = curve.points[(segmentIndex + 1) % pointCount];
+      const aScreen = worldToScreen(a);
+      const bScreen = worldToScreen(b);
+      const distanceSq = segmentPointDistanceSq(
+        aScreen.x,
+        aScreen.y,
+        bScreen.x,
+        bScreen.y,
+        pointerPos.x,
+        pointerPos.y,
+      );
+      if (distanceSq > bestDistanceSq) continue;
+      bestDistanceSq = distanceSq;
+      best = { curveIndex, segmentIndex };
+    }
+  }
+
+  return best;
+}
+
+function insertControlPointOnCurve(target: CurveInsertTarget, worldPoint: Vector3) {
+  const curve = curves[target.curveIndex];
+  if (!curve) return false;
+  const count = curve.points.length;
+  if (count < 2) return false;
+
+  const aIndex = target.segmentIndex;
+  const bIndex = (aIndex + 1) % count;
+  const a = curve.points[aIndex];
+  const b = curve.points[bIndex];
+  const snapped = projectPointToSegment2d(a.x, a.y, b.x, b.y, worldPoint.x, worldPoint.y);
+  curve.points.splice(bIndex, 0, { x: snapped.x, y: snapped.y, z: 0 });
+  return true;
+}
+
 function deleteEditableControlPoint(ref: EditableControlPointRef) {
   if (ref.source === 'draft') {
     if (ref.pointIndex < 0 || ref.pointIndex >= draft.length) return false;
@@ -1808,6 +1884,29 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     refreshStatus();
     return;
   }
+
+  if (draft.length === 0) {
+    const insertTarget = findCurveInsertTarget(pointerScreen);
+    if (insertTarget) {
+      if (engineReady) {
+        deferredMaskSnapshot = engine.exportSnapshot();
+      }
+      pushUndoState();
+      if (insertControlPointOnCurve(insertTarget, point)) {
+        setActiveControlPoint(null);
+        setHoverControlPoint(null);
+        setCloseCurveHintActive(false);
+        engineReady = false;
+        clearTimeline();
+        refreshRibbon();
+        refreshOverlays();
+        refreshStatus();
+        syncUi();
+      }
+      return;
+    }
+  }
+
   pushUndoState();
   addPoint(point, event);
 });
