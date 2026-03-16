@@ -26,6 +26,8 @@
 - `Stack Layers` simulation toggle:
   - Off (default): classic single-layer simulation view.
   - On: each iteration is stacked upward, with vertical spacing equal to Path Thickness.
+- `Flip Stack` toggle (default off):
+  - When enabled together with `Stack Layers`, oldest layers are placed at the top and new layers are placed at the bottom while staying above ground.
 - Ribbon mesh now extrudes upward with thickness equal to `Path Thickness` (height = width).
 - Path visibility toggles:
   - `Show Mesh` (default on): show/hide ribbon mesh.
@@ -75,6 +77,7 @@
 - Drawing:
   - `LMB`: add curve point on the ground plane
   - click finished path segment (while not drawing): insert control point on the displayed subdivided curve path
+  - `Reset Subdivision` button: reset `Start Subdivision` back to its default value
   - hover an authored control point: dark-orange point highlight
   - click an authored control point: bright-orange active highlight
   - drag selected authored control point: reshape the curve
@@ -102,6 +105,9 @@
   - `Show Mesh`: toggle ribbon mesh visibility
   - `Show Curve`: toggle path/curve overlay visibility
   - `Show Points`: toggle growth points overlay visibility
+- Stack:
+  - `Stack Layers`: render timeline layers in vertical stack
+  - `Flip Stack`: with stack enabled, place oldest layers at top and latest layers at bottom (still above ground)
 - Editing:
   - `Ctrl + Z`: undo
   - `Ctrl + Y` or `Ctrl + Shift + Z`: redo

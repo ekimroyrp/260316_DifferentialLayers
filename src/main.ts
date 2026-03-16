@@ -56,8 +56,7 @@ type Ui = {
   maskMode: HTMLButtonElement;
   blurMask: HTMLButtonElement;
   clearMask: HTMLButtonElement;
-  undoPoint: HTMLButtonElement;
-  undoCurve: HTMLButtonElement;
+  resetSubdivision: HTMLButtonElement;
   clearCurves: HTMLButtonElement;
   startSubdivision: HTMLInputElement;
   startSubdivisionValue: HTMLSpanElement;
@@ -66,6 +65,7 @@ type Ui = {
   timeline: HTMLInputElement;
   timelineValue: HTMLSpanElement;
   stackLayers: HTMLInputElement;
+  flipStack: HTMLInputElement;
   showMesh: HTMLInputElement;
   showPath: HTMLInputElement;
   showPoints: HTMLInputElement;
@@ -165,8 +165,7 @@ const ui: Ui = {
   maskMode: must('mask-mode'),
   blurMask: must('blur-mask'),
   clearMask: must('clear-mask'),
-  undoPoint: must('undo-point'),
-  undoCurve: must('undo-curve'),
+  resetSubdivision: must('reset-subdivision'),
   clearCurves: must('clear-curves'),
   startSubdivision: must('start-subdivision'),
   startSubdivisionValue: must('start-subdivision-value'),
@@ -175,6 +174,7 @@ const ui: Ui = {
   timeline: must('simulation-timeline'),
   timelineValue: must('simulation-timeline-value'),
   stackLayers: must('stack-layers'),
+  flipStack: must('flip-stack'),
   showMesh: must('show-mesh'),
   showPath: must('show-path'),
   showPoints: must('show-points'),
@@ -263,7 +263,10 @@ const materialSettings: MaterialSettings = {
   bloom: parseFloat(ui.bloom.value),
 };
 const appState: AppState = { running: false, viewMode: 'gradient' };
-let startSubdivision = Math.max(1, Math.round(parseFloat(ui.startSubdivision.value)));
+const parsedDefaultStartSubdivision = Number.parseFloat(ui.startSubdivision.defaultValue || ui.startSubdivision.value);
+const defaultStartSubdivision = Math.max(1, Math.round(Number.isFinite(parsedDefaultStartSubdivision) ? parsedDefaultStartSubdivision : 1));
+const parsedStartSubdivision = Number.parseFloat(ui.startSubdivision.value);
+let startSubdivision = Math.max(1, Math.round(Number.isFinite(parsedStartSubdivision) ? parsedStartSubdivision : defaultStartSubdivision));
 let baseSubdivision = startSubdivision;
 
 const renderer = new WebGLRenderer({ antialias: true, canvas, preserveDrawingBuffer: true });
@@ -490,15 +493,6 @@ function redoStep() {
   restoreState(next);
 }
 
-function selectEditableLabelText(label: HTMLElement) {
-  const selection = window.getSelection();
-  if (!selection) return;
-  const range = document.createRange();
-  range.selectNodeContents(label);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
 function rangeStepPrecision(step: number) {
   const text = `${step}`.toLowerCase();
   if (text.includes('e-')) {
@@ -536,19 +530,14 @@ function bindEditableRangeValue(
   fmt: (v: number) => string,
   applyValue: (v: number) => void,
 ) {
-  label.contentEditable = 'true';
-  label.classList.add('value-editor');
-  label.setAttribute('spellcheck', 'false');
-  label.setAttribute('role', 'textbox');
-  label.setAttribute('tabindex', '0');
+  let isManualEditing = false;
 
-  const commit = () => {
+  const commitManualValue = (rawValue: string) => {
     if (input.disabled) {
       label.textContent = fmt(Number.parseFloat(input.value));
       return;
     }
-    const raw = (label.textContent ?? '').trim().replace(',', '.');
-    const parsed = Number.parseFloat(raw);
+    const parsed = Number.parseFloat(rawValue.trim().replace(',', '.'));
     if (!Number.isFinite(parsed)) {
       label.textContent = fmt(Number.parseFloat(input.value));
       return;
@@ -556,22 +545,50 @@ function bindEditableRangeValue(
     applyValue(parsed);
   };
 
-  label.addEventListener('focus', () => {
-    requestAnimationFrame(() => selectEditableLabelText(label));
-  });
+  const beginManualEdit = () => {
+    if (isManualEditing || input.disabled) return;
+    isManualEditing = true;
 
-  label.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      label.blur();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      label.textContent = fmt(Number.parseFloat(input.value));
-      label.blur();
-    }
-  });
+    const editor = document.createElement('input');
+    editor.type = 'number';
+    editor.className = 'value-editor';
+    editor.value = input.value;
+    if (input.min) editor.min = input.min;
+    if (input.max) editor.max = input.max;
+    if (input.step) editor.step = input.step;
 
-  label.addEventListener('blur', commit);
+    label.replaceWith(editor);
+    editor.focus();
+    editor.select();
+
+    let finalized = false;
+    const finish = (commit: boolean) => {
+      if (finalized) return;
+      finalized = true;
+      const submitted = editor.value;
+      editor.replaceWith(label);
+      isManualEditing = false;
+      if (commit) commitManualValue(submitted);
+      else label.textContent = fmt(Number.parseFloat(input.value));
+    };
+
+    editor.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    editor.addEventListener('blur', () => finish(true));
+  };
+
+  label.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    beginManualEdit();
+  });
 }
 
 function bindRange(input: HTMLInputElement, label: HTMLSpanElement, fmt: (v: number) => string, onInput: (v: number) => void) {
@@ -806,6 +823,10 @@ function clearLayerStack() {
 
 function isLayerStackEnabled() {
   return ui.stackLayers.checked;
+}
+
+function isFlipStackEnabled() {
+  return ui.flipStack.checked;
 }
 
 function isMeshDisplayEnabled() {
@@ -1179,8 +1200,11 @@ function refreshClickedPoints() {
 
 function updateLayerHeights() {
   const heightStep = parseFloat(ui.ribbonWidth.value);
+  const count = layerGroup.children.length;
+  const flipStack = isLayerStackEnabled() && isFlipStackEnabled();
   for (let i = 0; i < layerGroup.children.length; i += 1) {
-    layerGroup.children[i].position.set(0, 0, i * heightStep);
+    const heightIndex = flipStack ? count - 1 - i : i;
+    layerGroup.children[i].position.set(0, 0, heightIndex * heightStep);
   }
 }
 
@@ -1455,8 +1479,7 @@ function syncUi() {
   ui.start.classList.toggle('is-stop-state', appState.running);
   ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
   ui.maskMode.classList.toggle('is-mask-active', appState.viewMode === 'mask');
-  ui.undoPoint.disabled = drawEditingDisabled;
-  ui.undoCurve.disabled = drawEditingDisabled;
+  ui.resetSubdivision.disabled = drawEditingDisabled;
   ui.clearCurves.disabled = appState.running || appState.viewMode === 'mask';
   syncTimeline();
   syncLayerVisibility();
@@ -1790,15 +1813,12 @@ ui.clearMask.addEventListener('click', () => {
   pushUndoState();
   engine.clearMask(); refreshRibbon(); setMode('mask'); syncUi();
 });
-ui.undoPoint.addEventListener('click', () => {
+ui.resetSubdivision.addEventListener('click', () => {
+  if (appState.running || appState.viewMode === 'mask' || drawLockedAfterPause) return;
+  if (startSubdivision === defaultStartSubdivision) return;
   pushUndoState();
-  if (draft.length > 0) draft.pop(); else if (curves.length) { const c = curves[curves.length - 1]; if (c.points.length > 2) c.points.pop(); else curves.pop(); }
-  engineReady = false; clearTimeline(); refreshRibbon(); refreshOverlays(); refreshStatus();
-});
-ui.undoCurve.addEventListener('click', () => {
-  pushUndoState();
-  if (draft.length) draft = []; else curves.pop();
-  engineReady = false; clearTimeline(); refreshRibbon(); refreshOverlays(); refreshStatus();
+  ui.startSubdivision.value = `${defaultStartSubdivision}`;
+  ui.startSubdivision.dispatchEvent(new Event('input', { bubbles: true }));
 });
 ui.clearCurves.addEventListener('click', () => {
   pushUndoState();
@@ -1843,6 +1863,11 @@ ui.timeline.addEventListener('input', () => {
 ui.stackLayers.addEventListener('change', () => {
   if (isLayerStackEnabled()) rebuildLayerStack(findTimelineIndexByStep(timelineStep));
   else clearLayerStack();
+  syncUi();
+});
+
+ui.flipStack.addEventListener('change', () => {
+  updateLayerHeights();
   syncUi();
 });
 

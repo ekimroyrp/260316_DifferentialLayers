@@ -64,10 +64,16 @@
               <input type="range" id="growth-speed" min="0.1" max="3" step="0.01" value="1" />
             </label>
 
-            <label class="control compact toggle-control" for="stack-layers">
-              <span>Stack Layers</span>
-              <input type="checkbox" id="stack-layers" />
-            </label>
+            <div class="control control-grid-2">
+              <label class="control compact toggle-control" for="stack-layers">
+                <span>Stack Layers</span>
+                <input type="checkbox" id="stack-layers" />
+              </label>
+              <label class="control compact toggle-control" for="flip-stack">
+                <span>Flip Stack</span>
+                <input type="checkbox" id="flip-stack" />
+              </label>
+            </div>
           </div>
         </section>
 
@@ -76,6 +82,15 @@
             <span class="panel-section-label">Path</span>
           </div>
           <div class="panel-section-content panel-controls-stack">
+            <div class="control-hint">
+              LMB = Draw Path<br />
+              Enter = Finish Path<br />
+              Connect to Start = Finish Path<br />
+              Shift+LMB on Path = Delete Path<br />
+              LMB on Path = Add Point<br />
+              Shift+LMB on Point = Delete Point<br />
+              LMB+Drag on Point = Move Point
+            </div>
             <label class="control">
               <div class="control-row">
                 <span>Start Subdivision</span>
@@ -104,10 +119,9 @@
                 <input type="checkbox" id="show-points" />
               </label>
             </div>
-            <div class="control control-grid-3">
-              <button type="button" id="undo-point" class="pill-button control-button-wide">Undo Point</button>
-              <button type="button" id="undo-curve" class="pill-button control-button-wide">Undo Curve</button>
-              <button type="button" id="clear-curves" class="pill-button control-button-wide">Clear All</button>
+            <div class="control control-grid-2">
+              <button type="button" id="reset-subdivision" class="pill-button control-button-wide">Reset Subdivision</button>
+              <button type="button" id="clear-curves" class="pill-button control-button-wide">Delete<br />All Paths</button>
             </div>
           </div>
         </section>
