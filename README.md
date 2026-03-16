@@ -28,6 +28,8 @@
   - On: each iteration is stacked upward, with vertical spacing equal to Path Thickness.
 - `Flip Stack` toggle (default off):
   - When enabled together with `Stack Layers`, oldest layers are placed at the top and new layers are placed at the bottom while staying above ground.
+- Stack overlay visibility:
+  - With `Stack Layers` enabled, `Show Curve` and `Show Points` display per-layer curve/point overlays for every stacked layer up to the current timeline layer.
 - Ribbon mesh now extrudes upward with thickness equal to `Path Thickness` (height = width).
 - Path visibility toggles:
   - `Show Mesh` (default on): show/hide ribbon mesh.
@@ -108,6 +110,7 @@
 - Stack:
   - `Stack Layers`: render timeline layers in vertical stack
   - `Flip Stack`: with stack enabled, place oldest layers at top and latest layers at bottom (still above ground)
+  - `Show Curve` + `Show Points` in stack mode: show overlays for each stacked layer up to the current layer
 - Editing:
   - `Ctrl + Z`: undo
   - `Ctrl + Y` or `Ctrl + Shift + Z`: redo

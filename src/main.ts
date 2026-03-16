@@ -315,9 +315,12 @@ const ribbonMesh = new Mesh(new BufferGeometry(), materialController.material);
 simRoot.add(ribbonMesh);
 const layerGroup = new Group();
 simRoot.add(layerGroup);
-const lineMesh = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: 0x2bb2ff, transparent: true, opacity: 0.9 }));
+const pathLineMaterial = new LineBasicMaterial({ color: 0x2bb2ff, transparent: true, opacity: 0.9 });
+const lineMesh = new LineSegments(new BufferGeometry(), pathLineMaterial);
 simRoot.add(lineMesh);
-const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
+const stackLineGroup = new Group();
+simRoot.add(stackLineGroup);
+const pathPointMaterial = new PointsMaterial({
   color: 0x7fb3ff,
   size: 9,
   sizeAttenuation: false,
@@ -325,9 +328,12 @@ const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
   opacity: 0.98,
   depthTest: false,
   depthWrite: false,
-}));
+});
+const pointsMesh = new Points(new BufferGeometry(), pathPointMaterial);
 pointsMesh.renderOrder = 30;
 simRoot.add(pointsMesh);
+const stackPointGroup = new Group();
+simRoot.add(stackPointGroup);
 const closeCurveHintGeometry = new BufferGeometry();
 closeCurveHintGeometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0]), 3));
 const closeCurveHintMesh = new Points(closeCurveHintGeometry, new PointsMaterial({
@@ -815,9 +821,22 @@ function removeLayerAt(index: number) {
   layerGroup.remove(child);
 }
 
+function removeStackOverlayAt(index: number) {
+  const lineChild = stackLineGroup.children[index];
+  if (lineChild instanceof LineSegments) lineChild.geometry.dispose();
+  if (lineChild) stackLineGroup.remove(lineChild);
+
+  const pointChild = stackPointGroup.children[index];
+  if (pointChild instanceof Points) pointChild.geometry.dispose();
+  if (pointChild) stackPointGroup.remove(pointChild);
+}
+
 function clearLayerStack() {
   for (let i = layerGroup.children.length - 1; i >= 0; i -= 1) {
     removeLayerAt(i);
+  }
+  for (let i = Math.max(stackLineGroup.children.length, stackPointGroup.children.length) - 1; i >= 0; i -= 1) {
+    removeStackOverlayAt(i);
   }
 }
 
@@ -841,12 +860,22 @@ function isPointDisplayEnabled() {
   return ui.showPoints.checked;
 }
 
+function isStackDisplayActive() {
+  return isLayerStackEnabled() && layerGroup.children.length > 0 && (appState.running || timeline.length > 1) && appState.viewMode !== 'mask';
+}
+
 function syncPathVisibility() {
-  lineMesh.visible = isPathDisplayEnabled();
+  const showPath = isPathDisplayEnabled();
+  const showStack = isStackDisplayActive();
+  lineMesh.visible = showPath && !showStack;
+  stackLineGroup.visible = showPath && showStack;
 }
 
 function syncPointVisibility() {
-  pointsMesh.visible = isPointDisplayEnabled();
+  const showPoints = isPointDisplayEnabled();
+  const showStack = isStackDisplayActive();
+  pointsMesh.visible = showPoints && !showStack;
+  stackPointGroup.visible = showPoints && showStack;
 }
 
 function canEditControlPoints() {
@@ -1200,19 +1229,26 @@ function refreshClickedPoints() {
 
 function updateLayerHeights() {
   const heightStep = parseFloat(ui.ribbonWidth.value);
-  const count = layerGroup.children.length;
   const flipStack = isLayerStackEnabled() && isFlipStackEnabled();
-  for (let i = 0; i < layerGroup.children.length; i += 1) {
-    const heightIndex = flipStack ? count - 1 - i : i;
-    layerGroup.children[i].position.set(0, 0, heightIndex * heightStep);
-  }
+  const applyGroupHeights = (group: Group) => {
+    const count = group.children.length;
+    for (let i = 0; i < count; i += 1) {
+      const heightIndex = flipStack ? count - 1 - i : i;
+      group.children[i].position.set(0, 0, heightIndex * heightStep);
+    }
+  };
+  applyGroupHeights(layerGroup);
+  applyGroupHeights(stackLineGroup);
+  applyGroupHeights(stackPointGroup);
 }
 
 function syncLayerVisibility() {
-  const showStack = isLayerStackEnabled() && layerGroup.children.length > 0 && (appState.running || timeline.length > 1) && appState.viewMode !== 'mask';
+  const showStack = isStackDisplayActive();
   const showMesh = isMeshDisplayEnabled();
   layerGroup.visible = showMesh && showStack;
   ribbonMesh.visible = showMesh && !showStack;
+  syncPathVisibility();
+  syncPointVisibility();
 }
 
 function pushCurrentLayer() {
@@ -1220,6 +1256,17 @@ function pushCurrentLayer() {
   const layerMesh = new Mesh(ribbonMesh.geometry.clone(), materialController.material);
   layerMesh.frustumCulled = false;
   layerGroup.add(layerMesh);
+
+  const layerCurves = engine.getCurves();
+  const layerLine = new LineSegments(buildLineGeometry(layerCurves, false, false), pathLineMaterial);
+  layerLine.frustumCulled = false;
+  stackLineGroup.add(layerLine);
+
+  const layerPoints = new Points(buildPointGeometry(layerCurves, false, false), pathPointMaterial);
+  layerPoints.frustumCulled = false;
+  layerPoints.renderOrder = 30;
+  stackPointGroup.add(layerPoints);
+
   updateLayerHeights();
   syncLayerVisibility();
 }
@@ -1240,6 +1287,16 @@ function rebuildLayerStack(maxIndex = timeline.length - 1) {
     const layerMesh = new Mesh(engine.getRibbonGeometry(ribbonWidth), materialController.material);
     layerMesh.frustumCulled = false;
     layerGroup.add(layerMesh);
+
+    const layerCurves = engine.getCurves();
+    const layerLine = new LineSegments(buildLineGeometry(layerCurves, false, false), pathLineMaterial);
+    layerLine.frustumCulled = false;
+    stackLineGroup.add(layerLine);
+
+    const layerPoints = new Points(buildPointGeometry(layerCurves, false, false), pathPointMaterial);
+    layerPoints.frustumCulled = false;
+    layerPoints.renderOrder = 30;
+    stackPointGroup.add(layerPoints);
   }
 
   engine.importSnapshot(saved);
@@ -1292,6 +1349,7 @@ function appendTimeline() {
     timeline.shift();
     if (isLayerStackEnabled()) {
       removeLayerAt(0);
+      removeStackOverlayAt(0);
       updateLayerHeights();
     }
   }
@@ -1429,27 +1487,31 @@ function getPreviewCurvePoints(curve: CurveData) {
   return buildSubdividedCurve(curve.points, curve.closed, startSubdivision);
 }
 
-function buildLineGeometry(sourceCurves: CurveData[]): BufferGeometry {
+function buildLineGeometry(sourceCurves: CurveData[], includeDraft = true, usePreviewPoints = true): BufferGeometry {
   const arr: number[] = [];
   const seg = (a: { x: number; y: number }, b: { x: number; y: number }) => arr.push(a.x, a.y, 0, b.x, b.y, 0);
   for (const c of sourceCurves) {
-    const previewPoints = getPreviewCurvePoints(c);
-    const limit = c.closed ? previewPoints.length : previewPoints.length - 1;
-    for (let i = 0; i < limit; i += 1) seg(previewPoints[i], previewPoints[(i + 1) % previewPoints.length]);
+    const points = usePreviewPoints ? getPreviewCurvePoints(c) : c.points;
+    const limit = c.closed ? points.length : points.length - 1;
+    for (let i = 0; i < limit; i += 1) seg(points[i], points[(i + 1) % points.length]);
   }
-  for (let i = 0; i < draft.length - 1; i += 1) seg(draft[i], draft[i + 1]);
+  if (includeDraft) {
+    for (let i = 0; i < draft.length - 1; i += 1) seg(draft[i], draft[i + 1]);
+  }
   const g = new BufferGeometry();
   g.setAttribute('position', new BufferAttribute(new Float32Array(arr), 3));
   return g;
 }
 
-function buildPointGeometry(sourceCurves: CurveData[]): BufferGeometry {
+function buildPointGeometry(sourceCurves: CurveData[], includeDraft = true, usePreviewPoints = true): BufferGeometry {
   const arr: number[] = [];
   for (const c of sourceCurves) {
-    const previewPoints = getPreviewCurvePoints(c);
-    for (const p of previewPoints) arr.push(p.x, p.y, 0);
+    const points = usePreviewPoints ? getPreviewCurvePoints(c) : c.points;
+    for (const p of points) arr.push(p.x, p.y, 0);
   }
-  for (const p of draft) arr.push(p.x, p.y, 0);
+  if (includeDraft) {
+    for (const p of draft) arr.push(p.x, p.y, 0);
+  }
   const g = new BufferGeometry();
   g.setAttribute('position', new BufferAttribute(new Float32Array(arr), 3));
   return g;
