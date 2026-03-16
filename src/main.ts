@@ -59,7 +59,6 @@ type Ui = {
   undoPoint: HTMLButtonElement;
   undoCurve: HTMLButtonElement;
   clearCurves: HTMLButtonElement;
-  drawStatus: HTMLDivElement;
   startSubdivision: HTMLInputElement;
   startSubdivisionValue: HTMLSpanElement;
   growthSpeed: HTMLInputElement;
@@ -162,7 +161,6 @@ const ui: Ui = {
   undoPoint: must('undo-point'),
   undoCurve: must('undo-curve'),
   clearCurves: must('clear-curves'),
-  drawStatus: must('draw-status'),
   startSubdivision: must('start-subdivision'),
   startSubdivisionValue: must('start-subdivision-value'),
   growthSpeed: must('growth-speed'),
@@ -485,15 +483,102 @@ function redoStep() {
   restoreState(next);
 }
 
+function selectEditableLabelText(label: HTMLElement) {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  range.selectNodeContents(label);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function rangeStepPrecision(step: number) {
+  const text = `${step}`.toLowerCase();
+  if (text.includes('e-')) {
+    const parts = text.split('e-');
+    return Number.parseInt(parts[1] ?? '0', 10) || 0;
+  }
+  const dot = text.indexOf('.');
+  return dot < 0 ? 0 : text.length - dot - 1;
+}
+
+function normalizeRangeValue(input: HTMLInputElement, value: number) {
+  let next = Number.isFinite(value) ? value : Number.parseFloat(input.value);
+  const min = Number.parseFloat(input.min);
+  const max = Number.parseFloat(input.max);
+  const step = Number.parseFloat(input.step);
+
+  if (Number.isFinite(min)) next = Math.max(min, next);
+  if (Number.isFinite(max)) next = Math.min(max, next);
+
+  if (Number.isFinite(step) && step > 0) {
+    const base = Number.isFinite(min) ? min : 0;
+    next = base + Math.round((next - base) / step) * step;
+    const precision = rangeStepPrecision(step);
+    if (precision > 0) next = Number(next.toFixed(precision));
+  }
+
+  if (Number.isFinite(min)) next = Math.max(min, next);
+  if (Number.isFinite(max)) next = Math.min(max, next);
+  return next;
+}
+
+function bindEditableRangeValue(
+  input: HTMLInputElement,
+  label: HTMLSpanElement,
+  fmt: (v: number) => string,
+  applyValue: (v: number) => void,
+) {
+  label.contentEditable = 'true';
+  label.classList.add('value-editor');
+  label.setAttribute('spellcheck', 'false');
+  label.setAttribute('role', 'textbox');
+  label.setAttribute('tabindex', '0');
+
+  const commit = () => {
+    if (input.disabled) {
+      label.textContent = fmt(Number.parseFloat(input.value));
+      return;
+    }
+    const raw = (label.textContent ?? '').trim().replace(',', '.');
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) {
+      label.textContent = fmt(Number.parseFloat(input.value));
+      return;
+    }
+    applyValue(parsed);
+  };
+
+  label.addEventListener('focus', () => {
+    requestAnimationFrame(() => selectEditableLabelText(label));
+  });
+
+  label.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      label.blur();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      label.textContent = fmt(Number.parseFloat(input.value));
+      label.blur();
+    }
+  });
+
+  label.addEventListener('blur', commit);
+}
+
 function bindRange(input: HTMLInputElement, label: HTMLSpanElement, fmt: (v: number) => string, onInput: (v: number) => void) {
-  const update = () => {
-    const value = parseFloat(input.value);
-    label.textContent = fmt(value);
-    onInput(value);
+  const applyValue = (next: number) => {
+    const normalized = normalizeRangeValue(input, next);
+    input.value = `${normalized}`;
+    label.textContent = fmt(normalized);
+    onInput(normalized);
     updateRangeProgress(input);
   };
-  input.addEventListener('input', update);
-  update();
+
+  input.addEventListener('input', () => applyValue(Number.parseFloat(input.value)));
+  bindEditableRangeValue(input, label, fmt, applyValue);
+  applyValue(Number.parseFloat(input.value));
 }
 
 function updateRangeProgress(input: HTMLInputElement) {
@@ -887,6 +972,25 @@ function moveActiveControlPoint(worldPoint: Vector3) {
   refreshStatus();
 }
 
+function deleteEditableControlPoint(ref: EditableControlPointRef) {
+  if (ref.source === 'draft') {
+    if (ref.pointIndex < 0 || ref.pointIndex >= draft.length) return false;
+    draft.splice(ref.pointIndex, 1);
+    return true;
+  }
+
+  const curve = curves[ref.curveIndex];
+  if (!curve) return false;
+  if (ref.pointIndex < 0 || ref.pointIndex >= curve.points.length) return false;
+
+  curve.points.splice(ref.pointIndex, 1);
+  const minPoints = curve.closed ? 3 : 2;
+  if (curve.points.length < minPoints) {
+    curves.splice(ref.curveIndex, 1);
+  }
+  return true;
+}
+
 function canCloseDraftCurve() {
   return canEditControlPoints() && draft.length >= 2;
 }
@@ -1242,11 +1346,7 @@ function refreshOverlays() {
 }
 
 function refreshStatus() {
-  if (appState.viewMode === 'mask') ui.drawStatus.textContent = 'Mask mode active. LMB paint, Shift+LMB erase.';
-  else if (appState.running) ui.drawStatus.textContent = `Simulation running. Curves: ${curves.length}`;
-  else if (drawLockedAfterPause) ui.drawStatus.textContent = 'Drawing paused. Reset or Clear All to draw again.';
-  else if (draft.length > 0) ui.drawStatus.textContent = `Drawing curve (${draft.length} points). Enter to end.`;
-  else ui.drawStatus.textContent = curves.length ? `Curves ready: ${curves.length}. Click to add another.` : 'Click to start a curve.';
+  // Path-section live status notifications removed by request.
 }
 
 function syncUi() {
@@ -1473,6 +1573,11 @@ bindRange(ui.startSubdivision, ui.startSubdivisionValue, (v) => `${Math.round(v)
   refreshOverlays();
   refreshStatus();
   syncUi();
+});
+bindEditableRangeValue(ui.timeline, ui.timelineValue, (v) => `${Math.round(v)}`, (v) => {
+  const next = Math.round(normalizeRangeValue(ui.timeline, v));
+  ui.timeline.value = `${next}`;
+  ui.timeline.dispatchEvent(new Event('input', { bubbles: true }));
 });
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (v) => v.toFixed(2), (v) => { simulationSettings.growthSpeed = v; });
 bindRange(ui.seed, ui.seedValue, (v) => `${Math.round(v)}`, (v) => { simulationSettings.seed = Math.round(v); engineReady = false; });
@@ -1705,6 +1810,33 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   }
   pushUndoState();
   addPoint(point, event);
+});
+
+renderer.domElement.addEventListener('dblclick', (event) => {
+  if (event.button !== 0 || isPanelTarget(event)) return;
+  if (!canEditControlPoints()) return;
+  pointerScreen.set(event.clientX, event.clientY);
+  const editablePoint = findEditableControlPoint(pointerScreen);
+  if (!editablePoint) return;
+
+  if (engineReady) {
+    deferredMaskSnapshot = engine.exportSnapshot();
+  }
+
+  pushUndoState();
+  if (!deleteEditableControlPoint(editablePoint)) return;
+
+  draggingControlPoint = false;
+  setActiveControlPoint(null);
+  setHoverControlPoint(null);
+  setCloseCurveHintActive(false);
+  engineReady = false;
+  clearTimeline();
+  refreshRibbon();
+  refreshOverlays();
+  refreshStatus();
+  syncUi();
+  event.preventDefault();
 });
 
 window.addEventListener('pointermove', (event) => {

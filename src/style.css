@@ -314,6 +314,7 @@ body {
 }
 
 .value-editor {
+  display: inline-block;
   min-width: 8ch;
   width: 8ch;
   padding: 1px 4px;
@@ -325,6 +326,8 @@ body {
   font-weight: 560;
   color: var(--text-primary);
   outline: none;
+  white-space: nowrap;
+  caret-color: var(--text-primary);
 }
 
 .value-editor::-webkit-outer-spin-button,
@@ -336,6 +339,11 @@ body {
 .value-editor {
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+.value-editor:focus {
+  border-color: rgba(203, 217, 255, 0.85);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .pill-button {

@@ -38,10 +38,13 @@
 - Authored control-point editing in draw mode:
   - hover an existing control point to highlight it dark orange,
   - click/select a control point to highlight it bright orange,
-  - drag the selected point to reshape the authored base curve.
+  - drag the selected point to reshape the authored base curve,
+  - double-click a control point to delete it and rebuild the path.
 - Mask preservation during authoring edits:
   - moving control points keeps existing mask intent and reprojects mask onto updated curve samples,
-  - changing `Start Subdivision` keeps mask intent and remaps mask to the new subdivision density.
+  - changing `Start Subdivision` keeps mask intent and remaps mask to the new subdivision density,
+  - deleting control points also remaps existing mask intent to the rebuilt path.
+- Slider value labels are directly editable by click/type (with Enter/blur commit and Esc cancel), without spinner arrows.
 - Unfinished-path handling:
   - `Start` clears any unfinished in-progress path instead of auto-finalizing it.
   - Simulation runs only with finished paths.
@@ -71,6 +74,7 @@
   - hover an authored control point: dark-orange point highlight
   - click an authored control point: bright-orange active highlight
   - drag selected authored control point: reshape the curve
+  - double-click authored control point: delete that point and rebuild the path
   - `Enter`: end current curve as open
   - hover near first point while drawing: start point turns green (close-ready)
   - click near first point while drawing: close curve and end it
