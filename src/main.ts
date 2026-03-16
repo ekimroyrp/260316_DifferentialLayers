@@ -1319,8 +1319,23 @@ function startStop() {
     refreshOverlays();
     return syncUi();
   }
-  if (draft.length >= 2) finalizeDraft(false);
-  if (!engineReady && !ensureEngine()) return;
+  if (draft.length > 0) {
+    draft = [];
+    setCloseCurveHintActive(false);
+    setHoverControlPoint(null);
+    setActiveControlPoint(null);
+    draggingControlPoint = false;
+    engineReady = false;
+    clearTimeline();
+    refreshRibbon();
+    refreshOverlays();
+    refreshStatus();
+  }
+  if (!engineReady && !ensureEngine()) {
+    refreshStatus();
+    syncUi();
+    return;
+  }
 
   if (isLayerStackEnabled()) {
     const currentIndex = findTimelineIndexByStep(timelineStep);
@@ -1492,6 +1507,11 @@ ui.reset.addEventListener('click', () => {
   pushUndoState();
   const currentMaskSnapshot = engineReady ? engine.exportSnapshot() : null;
   deferredMaskSnapshot = null;
+  draggingControlPoint = false;
+  setActiveControlPoint(null);
+  setHoverControlPoint(null);
+  setCloseCurveHintActive(false);
+  draft = [];
   drawLockedAfterPause = false;
   showClickedPointsAfterReset = false;
   appState.running = false;
@@ -1508,7 +1528,6 @@ ui.reset.addEventListener('click', () => {
     ui.startSubdivisionValue.textContent = `${baseSubdivision}`;
     updateRangeProgress(ui.startSubdivision);
     curves = cloneCurves(baseCurves);
-    draft = [];
     engineReady = false;
     if (ensureEngine(false, baseSubdivision)) {
       if (baseResetSnapshot) {

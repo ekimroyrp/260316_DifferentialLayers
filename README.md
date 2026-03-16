@@ -4,7 +4,7 @@
 
 ## Features
 
-- Multi-curve drawing workflow on the ground plane with open-curve (`Enter`) and close-on-start-click behavior.
+- Multi-curve path workflow on the ground plane with open-curve (`Enter`) and close-on-start-click behavior.
 - Live `Start Subdivision` preview updates while dragging, including path line and point overlays.
 - Live draw-time ribbon preview before simulation starts.
 - Shared differential-growth engine for all curves with:
@@ -25,11 +25,11 @@
 - Timeline scrubbing, undo/redo shortcuts, and export support (`OBJ`, `GLB`, `PNG`).
 - `Stack Layers` simulation toggle:
   - Off (default): classic single-layer simulation view.
-  - On: each iteration is stacked upward, with vertical spacing equal to Ribbon Width.
-- Ribbon mesh now extrudes upward with thickness equal to `Ribbon Width` (height = width).
-- Draw visibility toggles:
+  - On: each iteration is stacked upward, with vertical spacing equal to Path Thickness.
+- Ribbon mesh now extrudes upward with thickness equal to `Path Thickness` (height = width).
+- Path visibility toggles:
   - `Show Mesh` (default on): show/hide ribbon mesh.
-  - `Show Path` (default off): show/hide curve path overlay.
+  - `Show Curve` (default off): show/hide curve path overlay.
   - `Show Points` (default off): show/hide growth points overlay.
 - Clicked authoring points are displayed as larger markers to distinguish them from growth points:
   - completed curve points are gray,
@@ -42,6 +42,11 @@
 - Mask preservation during authoring edits:
   - moving control points keeps existing mask intent and reprojects mask onto updated curve samples,
   - changing `Start Subdivision` keeps mask intent and remaps mask to the new subdivision density.
+- Unfinished-path handling:
+  - `Start` clears any unfinished in-progress path instead of auto-finalizing it.
+  - Simulation runs only with finished paths.
+  - If no finished paths exist, `Start` does not run simulation.
+  - `Reset` clears unfinished in-progress path state.
 - Paused draw lock: after pausing simulation, drawing is blocked until `Reset` or `Clear All`.
 
 ## Getting Started
@@ -81,11 +86,12 @@
   - clicking `Enter Mask Mode`, `Blur Mask`, or `Clear Mask` while running pauses simulation and enters mask mode
 - Simulation:
   - `Start/Pause`: run or stop growth
+  - `Start` with an unfinished path: unfinished path is discarded; only finished paths run
   - `Reset`: reset geometry back to simulation start state while preserving mask intent
   - `Simulation Timeline`: scrub recorded steps (when paused)
 - Visibility:
   - `Show Mesh`: toggle ribbon mesh visibility
-  - `Show Path`: toggle path/curve overlay visibility
+  - `Show Curve`: toggle path/curve overlay visibility
   - `Show Points`: toggle growth points overlay visibility
 - Editing:
   - `Ctrl + Z`: undo

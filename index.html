@@ -73,7 +73,7 @@
 
         <section class="panel-section">
           <div class="panel-section-header">
-            <span class="panel-section-label">Draw</span>
+            <span class="panel-section-label">Path</span>
           </div>
           <div class="panel-section-content panel-controls-stack">
             <div id="draw-status" class="control-hint">Click to start a curve.</div>
@@ -86,7 +86,7 @@
             </label>
             <label class="control">
               <div class="control-row">
-                <span>Ribbon Width</span>
+                <span>Path Thickness</span>
                 <span id="ribbon-width-value">0.038</span>
               </div>
               <input type="range" id="ribbon-width" min="0.01" max="0.2" step="0.002" value="0.038" />
@@ -97,7 +97,7 @@
                 <input type="checkbox" id="show-mesh" checked />
               </label>
               <label class="control compact toggle-control" for="show-path">
-                <span>Show Path</span>
+                <span>Show Curve</span>
                 <input type="checkbox" id="show-path" />
               </label>
               <label class="control compact toggle-control" for="show-points">
@@ -210,9 +210,9 @@
             <label class="control">
               <div class="control-row">
                 <span>Shape Retention</span>
-                <span id="shape-retention-value">0.00</span>
+                <span id="shape-retention-value">0.10</span>
               </div>
-              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0.00" />
+              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0.10" />
             </label>
 
             <label class="control">
