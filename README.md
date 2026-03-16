@@ -23,6 +23,9 @@
   - gradient/material controls.
 - Infinite fading ground grid (ShoeShaper-style) integrated into the scene.
 - Timeline scrubbing, undo/redo shortcuts, and export support (`OBJ`, `GLB`, `PNG`).
+- `OBJ`/`GLB` exports mirror current on-screen visibility:
+  - exports stacked layers when stack mode is active,
+  - exports only enabled object types (`Show Mesh`, `Show Curve`, `Show Points`).
 - `Stack Layers` simulation toggle:
   - Off (default): classic single-layer simulation view.
   - On: each iteration is stacked upward, with vertical spacing equal to Path Thickness.
@@ -102,6 +105,7 @@
   - `Start/Pause`: run or stop growth
   - `Start` with an unfinished path: unfinished path is discarded; only finished paths run
   - `Reset`: reset geometry back to simulation start state while preserving mask intent
+  - `Reset Subdivision` and `Delete All Paths` stay available while running or paused; clicking them applies the action immediately and restarts simulation state
   - `Simulation Timeline`: scrub recorded steps (when paused)
 - Visibility:
   - `Show Mesh`: toggle ribbon mesh visibility

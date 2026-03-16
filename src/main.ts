@@ -120,6 +120,10 @@ type Ui = {
 };
 
 type TimelineEntry = { step: number; snapshot: DifferentialGrowthSnapshot };
+type ExportPrimitive =
+  | { kind: 'mesh'; geometry: BufferGeometry; positionZ: number }
+  | { kind: 'line'; geometry: BufferGeometry; positionZ: number; color: Color }
+  | { kind: 'point'; geometry: BufferGeometry; positionZ: number; color: Color };
 type UndoState = {
   curves: CurveData[];
   draft: CurvePoint[];
@@ -1535,14 +1539,13 @@ function refreshStatus() {
 }
 
 function syncUi() {
-  const drawEditingDisabled = appState.running || appState.viewMode === 'mask' || drawLockedAfterPause;
   ui.start.textContent = appState.running ? 'Pause' : 'Start';
   ui.start.classList.toggle('is-start-state', !appState.running);
   ui.start.classList.toggle('is-stop-state', appState.running);
   ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
   ui.maskMode.classList.toggle('is-mask-active', appState.viewMode === 'mask');
-  ui.resetSubdivision.disabled = drawEditingDisabled;
-  ui.clearCurves.disabled = appState.running || appState.viewMode === 'mask';
+  ui.resetSubdivision.disabled = false;
+  ui.clearCurves.disabled = false;
   syncTimeline();
   syncLayerVisibility();
   syncPathVisibility();
@@ -1591,6 +1594,16 @@ function finalizeDraft(closed: boolean): boolean {
   refreshOverlays();
   refreshStatus();
   return true;
+}
+
+function restartSimulationIfActiveOrPaused(shouldRestart: boolean) {
+  if (!shouldRestart) return;
+  appState.running = false;
+  drawLockedAfterPause = false;
+  setMode('gradient');
+  startStop();
+  refreshStatus();
+  syncUi();
 }
 
 function startStop() {
@@ -1679,12 +1692,11 @@ function paintMask(point: Vector3, erase: boolean) {
   refreshRibbon();
 }
 
-function exportColorizedGeometry() {
-  if (!engineReady) return null;
-  const g = engine.getRibbonGeometry(parseFloat(ui.ribbonWidth.value));
-  const curv = g.getAttribute('aCurvature') as BufferAttribute;
-  const disp = g.getAttribute('aDisplacement') as BufferAttribute;
-  const mask = g.getAttribute('aMask') as BufferAttribute;
+function buildMeshVertexColors(geometry: BufferGeometry): Float32Array | null {
+  const curv = geometry.getAttribute('aCurvature');
+  const disp = geometry.getAttribute('aDisplacement');
+  if (!(curv instanceof BufferAttribute) || !(disp instanceof BufferAttribute)) return null;
+  const mask = geometry.getAttribute('aMask');
   const colors = new Float32Array(curv.count * 3);
   const c0 = new Color(materialSettings.gradientStart);
   const c1 = new Color(materialSettings.gradientEnd);
@@ -1693,10 +1705,66 @@ function exportColorizedGeometry() {
     const a = MathUtils.clamp(curv.getX(i) * materialSettings.curvatureContrast + materialSettings.curvatureBias, 0, 1);
     const b = MathUtils.clamp(disp.getX(i) * materialSettings.curvatureContrast + materialSettings.curvatureBias, 0, 1);
     c.copy(c0).lerp(c1, materialSettings.gradientType === 'displacement' ? b : a);
-    if (appState.viewMode === 'mask') c.setScalar(1 - MathUtils.clamp(mask.getX(i), 0, 1));
-    colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+    if (appState.viewMode === 'mask' && mask instanceof BufferAttribute) {
+      c.setScalar(1 - MathUtils.clamp(mask.getX(i), 0, 1));
+    }
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
   }
-  return { g, colors };
+  return colors;
+}
+
+function collectVisibleExportPrimitives(): ExportPrimitive[] {
+  const out: ExportPrimitive[] = [];
+  const stackActive = isStackDisplayActive();
+
+  if (isMeshDisplayEnabled()) {
+    if (stackActive) {
+      for (let i = 0; i < layerGroup.children.length; i += 1) {
+        const child = layerGroup.children[i];
+        if (!(child instanceof Mesh) || !(child.geometry instanceof BufferGeometry)) continue;
+        out.push({ kind: 'mesh', geometry: child.geometry, positionZ: child.position.z });
+      }
+    } else if (ribbonMesh.geometry instanceof BufferGeometry) {
+      out.push({ kind: 'mesh', geometry: ribbonMesh.geometry, positionZ: ribbonMesh.position.z });
+    }
+  }
+
+  if (isPathDisplayEnabled()) {
+    if (stackActive) {
+      for (let i = 0; i < stackLineGroup.children.length; i += 1) {
+        const child = stackLineGroup.children[i];
+        if (!(child instanceof LineSegments) || !(child.geometry instanceof BufferGeometry)) continue;
+        out.push({ kind: 'line', geometry: child.geometry, positionZ: child.position.z, color: pathLineMaterial.color.clone() });
+      }
+    } else if (lineMesh.geometry instanceof BufferGeometry) {
+      out.push({ kind: 'line', geometry: lineMesh.geometry, positionZ: lineMesh.position.z, color: pathLineMaterial.color.clone() });
+    }
+  }
+
+  if (isPointDisplayEnabled()) {
+    if (stackActive) {
+      for (let i = 0; i < stackPointGroup.children.length; i += 1) {
+        const child = stackPointGroup.children[i];
+        if (!(child instanceof Points) || !(child.geometry instanceof BufferGeometry)) continue;
+        out.push({ kind: 'point', geometry: child.geometry, positionZ: child.position.z, color: pathPointMaterial.color.clone() });
+      }
+    } else if (pointsMesh.geometry instanceof BufferGeometry) {
+      out.push({ kind: 'point', geometry: pointsMesh.geometry, positionZ: pointsMesh.position.z, color: pathPointMaterial.color.clone() });
+    }
+  }
+
+  return out;
+}
+
+function cloneGeometryForExport(source: BufferGeometry, positionZ: number) {
+  const g = source.clone();
+  if (Math.abs(positionZ) > 1e-8) {
+    g.translate(0, 0, positionZ);
+  }
+  g.rotateX(-Math.PI / 2);
+  return g;
 }
 
 function download(name: string, blob: Blob) {
@@ -1706,30 +1774,128 @@ function download(name: string, blob: Blob) {
 }
 
 function exportObj() {
-  const data = exportColorizedGeometry(); if (!data) return;
-  data.g.rotateX(-Math.PI / 2);
-  const pos = data.g.getAttribute('position') as BufferAttribute;
-  const idx = data.g.index;
+  const primitives = collectVisibleExportPrimitives();
+  if (primitives.length === 0) return;
   const lines: string[] = [];
-  for (let i = 0; i < pos.count; i += 1) {
-    const o = i * 3;
-    lines.push(`v ${pos.getX(i)} ${pos.getY(i)} ${pos.getZ(i)} ${data.colors[o]} ${data.colors[o + 1]} ${data.colors[o + 2]}`);
+  let vertexOffset = 0;
+
+  for (const primitive of primitives) {
+    const g = cloneGeometryForExport(primitive.geometry, primitive.positionZ);
+    const pos = g.getAttribute('position');
+    if (!(pos instanceof BufferAttribute) || pos.count === 0) {
+      g.dispose();
+      continue;
+    }
+
+    if (primitive.kind === 'mesh') {
+      const colors = buildMeshVertexColors(primitive.geometry);
+      for (let i = 0; i < pos.count; i += 1) {
+        const o = i * 3;
+        const r = colors ? colors[o] : 1;
+        const gr = colors ? colors[o + 1] : 1;
+        const b = colors ? colors[o + 2] : 1;
+        lines.push(`v ${pos.getX(i)} ${pos.getY(i)} ${pos.getZ(i)} ${r} ${gr} ${b}`);
+      }
+      const idx = g.index;
+      if (idx) {
+        for (let i = 0; i < idx.count; i += 3) {
+          lines.push(`f ${idx.getX(i) + 1 + vertexOffset} ${idx.getX(i + 1) + 1 + vertexOffset} ${idx.getX(i + 2) + 1 + vertexOffset}`);
+        }
+      } else {
+        for (let i = 0; i + 2 < pos.count; i += 3) {
+          lines.push(`f ${vertexOffset + i + 1} ${vertexOffset + i + 2} ${vertexOffset + i + 3}`);
+        }
+      }
+    } else if (primitive.kind === 'line') {
+      const { r, g: gr, b } = primitive.color;
+      for (let i = 0; i < pos.count; i += 1) {
+        lines.push(`v ${pos.getX(i)} ${pos.getY(i)} ${pos.getZ(i)} ${r} ${gr} ${b}`);
+      }
+      for (let i = 0; i + 1 < pos.count; i += 2) {
+        lines.push(`l ${vertexOffset + i + 1} ${vertexOffset + i + 2}`);
+      }
+    } else {
+      const { r, g: gr, b } = primitive.color;
+      for (let i = 0; i < pos.count; i += 1) {
+        lines.push(`v ${pos.getX(i)} ${pos.getY(i)} ${pos.getZ(i)} ${r} ${gr} ${b}`);
+      }
+      for (let i = 0; i < pos.count; i += 1) {
+        lines.push(`p ${vertexOffset + i + 1}`);
+      }
+    }
+
+    vertexOffset += pos.count;
+    g.dispose();
   }
-  if (idx) for (let i = 0; i < idx.count; i += 3) lines.push(`f ${idx.getX(i) + 1} ${idx.getX(i + 1) + 1} ${idx.getX(i + 2) + 1}`);
-  data.g.dispose();
+
+  if (vertexOffset === 0) return;
   download(`differential-layers-step-${timelineStep}.obj`, new Blob([lines.join('\n')], { type: 'text/plain' }));
 }
 
 function exportGlb() {
-  const data = exportColorizedGeometry(); if (!data) return;
-  data.g.rotateX(-Math.PI / 2);
-  data.g.setAttribute('color', new BufferAttribute(data.colors, 3));
-  const mesh = new Mesh(data.g, new MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.08 }));
-  new GLTFExporter().parse(mesh, (result) => {
-    if (result instanceof ArrayBuffer) download(`differential-layers-step-${timelineStep}.glb`, new Blob([result], { type: 'model/gltf-binary' }));
-    mesh.geometry.dispose(); (mesh.material as MeshStandardMaterial).dispose();
+  const primitives = collectVisibleExportPrimitives();
+  if (primitives.length === 0) return;
+
+  const root = new Group();
+  const geometries: BufferGeometry[] = [];
+  const materials: { dispose: () => void }[] = [];
+
+  for (const primitive of primitives) {
+    const g = cloneGeometryForExport(primitive.geometry, primitive.positionZ);
+    const pos = g.getAttribute('position');
+    if (!(pos instanceof BufferAttribute) || pos.count === 0) {
+      g.dispose();
+      continue;
+    }
+
+    geometries.push(g);
+    if (primitive.kind === 'mesh') {
+      const colors = buildMeshVertexColors(primitive.geometry);
+      if (colors) g.setAttribute('color', new BufferAttribute(colors, 3));
+      const m = new MeshStandardMaterial({ vertexColors: Boolean(colors), color: 0xffffff, roughness: 0.62, metalness: 0.08 });
+      materials.push(m);
+      root.add(new Mesh(g, m));
+    } else if (primitive.kind === 'line') {
+      const m = new LineBasicMaterial({
+        color: primitive.color,
+        transparent: pathLineMaterial.transparent,
+        opacity: pathLineMaterial.opacity,
+      });
+      materials.push(m);
+      root.add(new LineSegments(g, m));
+    } else {
+      const m = new PointsMaterial({
+        color: primitive.color,
+        size: pathPointMaterial.size,
+        sizeAttenuation: pathPointMaterial.sizeAttenuation,
+        transparent: pathPointMaterial.transparent,
+        opacity: pathPointMaterial.opacity,
+        depthTest: pathPointMaterial.depthTest,
+        depthWrite: pathPointMaterial.depthWrite,
+      });
+      materials.push(m);
+      root.add(new Points(g, m));
+    }
+  }
+
+  if (root.children.length === 0) {
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+    return;
+  }
+
+  const cleanup = () => {
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+  };
+
+  new GLTFExporter().parse(root, (result) => {
+    if (result instanceof ArrayBuffer) {
+      download(`differential-layers-step-${timelineStep}.glb`, new Blob([result], { type: 'model/gltf-binary' }));
+    }
+    cleanup();
   }, () => {
-    mesh.geometry.dispose(); (mesh.material as MeshStandardMaterial).dispose();
+    cleanup();
   }, { binary: true });
 }
 
@@ -1876,18 +2042,25 @@ ui.clearMask.addEventListener('click', () => {
   engine.clearMask(); refreshRibbon(); setMode('mask'); syncUi();
 });
 ui.resetSubdivision.addEventListener('click', () => {
-  if (appState.running || appState.viewMode === 'mask' || drawLockedAfterPause) return;
-  if (startSubdivision === defaultStartSubdivision) return;
+  const shouldRestart = appState.running || drawLockedAfterPause;
+  if (startSubdivision === defaultStartSubdivision && !shouldRestart) return;
   pushUndoState();
-  ui.startSubdivision.value = `${defaultStartSubdivision}`;
-  ui.startSubdivision.dispatchEvent(new Event('input', { bubbles: true }));
+  if (startSubdivision !== defaultStartSubdivision) {
+    ui.startSubdivision.value = `${defaultStartSubdivision}`;
+    ui.startSubdivision.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  restartSimulationIfActiveOrPaused(shouldRestart);
 });
 ui.clearCurves.addEventListener('click', () => {
+  const shouldRestart = appState.running || drawLockedAfterPause;
   pushUndoState();
+  appState.running = false;
+  setMode('gradient');
   drawLockedAfterPause = false;
   showClickedPointsAfterReset = false;
   deferredMaskSnapshot = null;
   curves = []; draft = []; baseCurves = []; baseResetSnapshot = null; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
+  restartSimulationIfActiveOrPaused(shouldRestart);
 });
 
 ui.exportObj.addEventListener('click', exportObj);
