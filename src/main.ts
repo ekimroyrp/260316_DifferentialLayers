@@ -5,7 +5,9 @@ import {
   BufferGeometry,
   Color,
   Group,
+  Line,
   LineBasicMaterial,
+  LineLoop,
   LineSegments,
   MOUSE,
   MathUtils,
@@ -122,7 +124,7 @@ type Ui = {
 type TimelineEntry = { step: number; snapshot: DifferentialGrowthSnapshot };
 type ExportPrimitive =
   | { kind: 'mesh'; geometry: BufferGeometry; positionZ: number }
-  | { kind: 'line'; geometry: BufferGeometry; positionZ: number; color: Color }
+  | { kind: 'polyline'; points: CurvePoint[]; closed: boolean; positionZ: number; color: Color }
   | { kind: 'point'; geometry: BufferGeometry; positionZ: number; color: Color };
 type UndoState = {
   curves: CurveData[];
@@ -429,6 +431,7 @@ let nextCurveId = 1;
 let engineReady = false;
 let baseCurves: CurveData[] = [];
 let baseResetSnapshot: DifferentialGrowthSnapshot | null = null;
+const stackLayerCurves: CurveData[][] = [];
 const timeline: TimelineEntry[] = [];
 let timelineStep = 0;
 let timelineSync = false;
@@ -842,6 +845,7 @@ function clearLayerStack() {
   for (let i = Math.max(stackLineGroup.children.length, stackPointGroup.children.length) - 1; i >= 0; i -= 1) {
     removeStackOverlayAt(i);
   }
+  stackLayerCurves.length = 0;
 }
 
 function isLayerStackEnabled() {
@@ -1270,6 +1274,7 @@ function pushCurrentLayer() {
   layerPoints.frustumCulled = false;
   layerPoints.renderOrder = 30;
   stackPointGroup.add(layerPoints);
+  stackLayerCurves.push(cloneCurves(layerCurves));
 
   updateLayerHeights();
   syncLayerVisibility();
@@ -1301,6 +1306,7 @@ function rebuildLayerStack(maxIndex = timeline.length - 1) {
     layerPoints.frustumCulled = false;
     layerPoints.renderOrder = 30;
     stackPointGroup.add(layerPoints);
+    stackLayerCurves.push(cloneCurves(layerCurves));
   }
 
   engine.importSnapshot(saved);
@@ -1354,6 +1360,7 @@ function appendTimeline() {
     if (isLayerStackEnabled()) {
       removeLayerAt(0);
       removeStackOverlayAt(0);
+      if (stackLayerCurves.length > 0) stackLayerCurves.shift();
       updateLayerHeights();
     }
   }
@@ -1639,7 +1646,10 @@ function startStop() {
     if (currentIndex >= 0 && currentIndex < timeline.length - 1) {
       timeline.splice(currentIndex + 1);
       while (layerGroup.children.length > currentIndex + 1) {
-        removeLayerAt(layerGroup.children.length - 1);
+        const removeIndex = layerGroup.children.length - 1;
+        removeLayerAt(removeIndex);
+        removeStackOverlayAt(removeIndex);
+        if (stackLayerCurves.length > removeIndex) stackLayerCurves.splice(removeIndex, 1);
       }
       updateLayerHeights();
     }
@@ -1715,6 +1725,23 @@ function buildMeshVertexColors(geometry: BufferGeometry): Float32Array | null {
   return colors;
 }
 
+function buildDisplayedExportCurves(sourceCurves: CurveData[], includeDraft: boolean, usePreviewPoints: boolean) {
+  const out: CurveData[] = [];
+  for (const curve of sourceCurves) {
+    const points = usePreviewPoints ? getPreviewCurvePoints(curve) : curve.points;
+    if (points.length < 2) continue;
+    out.push({
+      id: curve.id,
+      closed: curve.closed,
+      points: points.map((point) => ({ x: point.x, y: point.y, z: point.z ?? 0 })),
+    });
+  }
+  if (includeDraft && draft.length >= 2) {
+    out.push({ id: -1, closed: false, points: cloneDraft(draft) });
+  }
+  return out;
+}
+
 function collectVisibleExportPrimitives(): ExportPrimitive[] {
   const out: ExportPrimitive[] = [];
   const stackActive = isStackDisplayActive();
@@ -1733,13 +1760,32 @@ function collectVisibleExportPrimitives(): ExportPrimitive[] {
 
   if (isPathDisplayEnabled()) {
     if (stackActive) {
-      for (let i = 0; i < stackLineGroup.children.length; i += 1) {
-        const child = stackLineGroup.children[i];
-        if (!(child instanceof LineSegments) || !(child.geometry instanceof BufferGeometry)) continue;
-        out.push({ kind: 'line', geometry: child.geometry, positionZ: child.position.z, color: pathLineMaterial.color.clone() });
+      for (let i = 0; i < stackLayerCurves.length; i += 1) {
+        const curvesAtLayer = stackLayerCurves[i];
+        const layerZ = stackLineGroup.children[i]?.position.z ?? layerGroup.children[i]?.position.z ?? 0;
+        for (const curve of curvesAtLayer) {
+          if (curve.points.length < 2) continue;
+          out.push({
+            kind: 'polyline',
+            points: curve.points.map((point) => ({ x: point.x, y: point.y, z: point.z ?? 0 })),
+            closed: curve.closed,
+            positionZ: layerZ,
+            color: pathLineMaterial.color.clone(),
+          });
+        }
       }
-    } else if (lineMesh.geometry instanceof BufferGeometry) {
-      out.push({ kind: 'line', geometry: lineMesh.geometry, positionZ: lineMesh.position.z, color: pathLineMaterial.color.clone() });
+    } else {
+      const overlayCurves = getOverlayCurves();
+      const curvesForExport = buildDisplayedExportCurves(overlayCurves, !appState.running, !appState.running);
+      for (const curve of curvesForExport) {
+        out.push({
+          kind: 'polyline',
+          points: curve.points.map((point) => ({ x: point.x, y: point.y, z: point.z ?? 0 })),
+          closed: curve.closed,
+          positionZ: lineMesh.position.z,
+          color: pathLineMaterial.color.clone(),
+        });
+      }
     }
   }
 
@@ -1767,6 +1813,23 @@ function cloneGeometryForExport(source: BufferGeometry, positionZ: number) {
   return g;
 }
 
+function buildPolylineGeometryForExport(points: CurvePoint[], positionZ: number) {
+  const arr = new Float32Array(points.length * 3);
+  for (let i = 0; i < points.length; i += 1) {
+    const offset = i * 3;
+    arr[offset] = points[i].x;
+    arr[offset + 1] = points[i].y;
+    arr[offset + 2] = points[i].z ?? 0;
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(arr, 3));
+  if (Math.abs(positionZ) > 1e-8) {
+    g.translate(0, 0, positionZ);
+  }
+  g.rotateX(-Math.PI / 2);
+  return g;
+}
+
 function download(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1780,7 +1843,9 @@ function exportObj() {
   let vertexOffset = 0;
 
   for (const primitive of primitives) {
-    const g = cloneGeometryForExport(primitive.geometry, primitive.positionZ);
+    const g = primitive.kind === 'polyline'
+      ? buildPolylineGeometryForExport(primitive.points, primitive.positionZ)
+      : cloneGeometryForExport(primitive.geometry, primitive.positionZ);
     const pos = g.getAttribute('position');
     if (!(pos instanceof BufferAttribute) || pos.count === 0) {
       g.dispose();
@@ -1806,13 +1871,18 @@ function exportObj() {
           lines.push(`f ${vertexOffset + i + 1} ${vertexOffset + i + 2} ${vertexOffset + i + 3}`);
         }
       }
-    } else if (primitive.kind === 'line') {
+    } else if (primitive.kind === 'polyline') {
       const { r, g: gr, b } = primitive.color;
       for (let i = 0; i < pos.count; i += 1) {
         lines.push(`v ${pos.getX(i)} ${pos.getY(i)} ${pos.getZ(i)} ${r} ${gr} ${b}`);
       }
-      for (let i = 0; i + 1 < pos.count; i += 2) {
-        lines.push(`l ${vertexOffset + i + 1} ${vertexOffset + i + 2}`);
+      const indices: number[] = [];
+      for (let i = 0; i < pos.count; i += 1) {
+        indices.push(vertexOffset + i + 1);
+      }
+      if (indices.length >= 2) {
+        if (primitive.closed) indices.push(indices[0]);
+        lines.push(`l ${indices.join(' ')}`);
       }
     } else {
       const { r, g: gr, b } = primitive.color;
@@ -1841,7 +1911,9 @@ function exportGlb() {
   const materials: { dispose: () => void }[] = [];
 
   for (const primitive of primitives) {
-    const g = cloneGeometryForExport(primitive.geometry, primitive.positionZ);
+    const g = primitive.kind === 'polyline'
+      ? buildPolylineGeometryForExport(primitive.points, primitive.positionZ)
+      : cloneGeometryForExport(primitive.geometry, primitive.positionZ);
     const pos = g.getAttribute('position');
     if (!(pos instanceof BufferAttribute) || pos.count === 0) {
       g.dispose();
@@ -1855,14 +1927,14 @@ function exportGlb() {
       const m = new MeshStandardMaterial({ vertexColors: Boolean(colors), color: 0xffffff, roughness: 0.62, metalness: 0.08 });
       materials.push(m);
       root.add(new Mesh(g, m));
-    } else if (primitive.kind === 'line') {
+    } else if (primitive.kind === 'polyline') {
       const m = new LineBasicMaterial({
         color: primitive.color,
         transparent: pathLineMaterial.transparent,
         opacity: pathLineMaterial.opacity,
       });
       materials.push(m);
-      root.add(new LineSegments(g, m));
+      root.add(primitive.closed ? new LineLoop(g, m) : new Line(g, m));
     } else {
       const m = new PointsMaterial({
         color: primitive.color,

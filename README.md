@@ -25,7 +25,8 @@
 - Timeline scrubbing, undo/redo shortcuts, and export support (`OBJ`, `GLB`, `PNG`).
 - `OBJ`/`GLB` exports mirror current on-screen visibility:
   - exports stacked layers when stack mode is active,
-  - exports only enabled object types (`Show Mesh`, `Show Curve`, `Show Points`).
+  - exports only enabled object types (`Show Mesh`, `Show Curve`, `Show Points`),
+  - exports curves as joined polylines (instead of separate line segments).
 - `Stack Layers` simulation toggle:
   - Off (default): classic single-layer simulation view.
   - On: each iteration is stacked upward, with vertical spacing equal to Path Thickness.
