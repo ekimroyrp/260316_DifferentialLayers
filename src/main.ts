@@ -1724,7 +1724,7 @@ ui.gradientType.addEventListener('change', () => { materialSettings.gradientType
 ui.start.addEventListener('click', () => { pushUndoState(); startStop(); refreshStatus(); syncUi(); });
 ui.reset.addEventListener('click', () => {
   pushUndoState();
-  const currentMaskSnapshot = engineReady ? engine.exportSnapshot() : null;
+  const currentMaskSnapshot = engineReady ? engine.exportSnapshot() : deferredMaskSnapshot;
   deferredMaskSnapshot = null;
   draggingControlPoint = false;
   setActiveControlPoint(null);
@@ -1752,8 +1752,9 @@ ui.reset.addEventListener('click', () => {
       if (baseResetSnapshot) {
         engine.importSnapshot(baseResetSnapshot);
       }
+      engine.clearMask();
       if (currentMaskSnapshot) {
-        engine.applyMaskFromSnapshot(currentMaskSnapshot, 'max');
+        engine.applyMaskFromSnapshot(currentMaskSnapshot, 'replace');
       }
       engineReady = true;
       showClickedPointsAfterReset = true;
