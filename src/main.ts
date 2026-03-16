@@ -1071,21 +1071,6 @@ function insertControlPointOnCurve(target: CurveInsertTarget, worldPoint: Vector
   return true;
 }
 
-function findDeleteControlPointFromCurveTarget(target: CurveInsertTarget, pointerPos: Vector2): EditableControlPointRef | null {
-  const curve = curves[target.curveIndex];
-  if (!curve) return null;
-  const count = curve.points.length;
-  if (count === 0) return null;
-
-  const aIndex = MathUtils.clamp(target.controlSegmentIndex, 0, Math.max(0, count - 1));
-  const bIndex = curve.closed ? (aIndex + 1) % count : Math.min(aIndex + 1, count - 1);
-  const aScreen = worldToScreen(curve.points[aIndex]);
-  const bScreen = worldToScreen(curve.points[bIndex]);
-  const da = (aScreen.x - pointerPos.x) ** 2 + (aScreen.y - pointerPos.y) ** 2;
-  const db = (bScreen.x - pointerPos.x) ** 2 + (bScreen.y - pointerPos.y) ** 2;
-  return { source: 'curve', curveIndex: target.curveIndex, pointIndex: da <= db ? aIndex : bIndex };
-}
-
 function deleteEditableControlPoint(ref: EditableControlPointRef) {
   if (ref.source === 'draft') {
     if (ref.pointIndex < 0 || ref.pointIndex >= draft.length) return false;
@@ -1900,6 +1885,25 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   if (canEditControlPoints()) {
     const editablePoint = findEditableControlPoint(pointerScreen);
     if (editablePoint) {
+      if (event.shiftKey) {
+        if (engineReady) {
+          deferredMaskSnapshot = engine.exportSnapshot();
+        }
+        pushUndoState();
+        if (deleteEditableControlPoint(editablePoint)) {
+          draggingControlPoint = false;
+          setActiveControlPoint(null);
+          setHoverControlPoint(null);
+          setCloseCurveHintActive(false);
+          engineReady = false;
+          clearTimeline();
+          refreshRibbon();
+          refreshOverlays();
+          refreshStatus();
+          syncUi();
+        }
+        return;
+      }
       pushUndoState();
       draggingControlPoint = true;
       setActiveControlPoint(editablePoint);
@@ -1927,6 +1931,26 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
   if (draft.length === 0) {
     const insertTarget = findCurveInsertTarget(pointerScreen);
     if (insertTarget) {
+      if (event.shiftKey) {
+        if (engineReady) {
+          deferredMaskSnapshot = engine.exportSnapshot();
+        }
+        pushUndoState();
+        if (insertTarget.curveIndex >= 0 && insertTarget.curveIndex < curves.length) {
+          curves.splice(insertTarget.curveIndex, 1);
+          draggingControlPoint = false;
+          setActiveControlPoint(null);
+          setHoverControlPoint(null);
+          setCloseCurveHintActive(false);
+          engineReady = false;
+          clearTimeline();
+          refreshRibbon();
+          refreshOverlays();
+          refreshStatus();
+          syncUi();
+        }
+        return;
+      }
       if (engineReady) {
         deferredMaskSnapshot = engine.exportSnapshot();
       }
@@ -1948,39 +1972,6 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
 
   pushUndoState();
   addPoint(point, event);
-});
-
-renderer.domElement.addEventListener('dblclick', (event) => {
-  if (event.button !== 0 || isPanelTarget(event)) return;
-  if (!canEditControlPoints()) return;
-  pointerScreen.set(event.clientX, event.clientY);
-  let editablePoint = findEditableControlPoint(pointerScreen);
-  if (!editablePoint && draft.length === 0) {
-    const insertTarget = findCurveInsertTarget(pointerScreen);
-    if (insertTarget) {
-      editablePoint = findDeleteControlPointFromCurveTarget(insertTarget, pointerScreen);
-    }
-  }
-  if (!editablePoint) return;
-
-  if (engineReady) {
-    deferredMaskSnapshot = engine.exportSnapshot();
-  }
-
-  pushUndoState();
-  if (!deleteEditableControlPoint(editablePoint)) return;
-
-  draggingControlPoint = false;
-  setActiveControlPoint(null);
-  setHoverControlPoint(null);
-  setCloseCurveHintActive(false);
-  engineReady = false;
-  clearTimeline();
-  refreshRibbon();
-  refreshOverlays();
-  refreshStatus();
-  syncUi();
-  event.preventDefault();
 });
 
 window.addEventListener('pointermove', (event) => {

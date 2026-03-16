@@ -40,7 +40,8 @@
   - click/select a control point to highlight it bright orange,
   - drag the selected point to reshape the authored base curve,
   - click a finished path segment (only when not drawing another path) to insert a new control point based on the visible subdivided curve shape,
-  - double-click a control point, or double-click near a finished path segment, to remove the nearest authored control point and rebuild the path.
+  - `Shift + Click` a control point to remove that authored control point and rebuild the path,
+  - `Shift + Click` a finished path segment (only when not drawing another path) to delete that finished path.
 - Mask preservation during authoring edits:
   - moving control points keeps existing mask intent and reprojects mask onto updated curve samples,
   - changing `Start Subdivision` keeps mask intent and remaps mask to the new subdivision density,
@@ -77,7 +78,8 @@
   - hover an authored control point: dark-orange point highlight
   - click an authored control point: bright-orange active highlight
   - drag selected authored control point: reshape the curve
-  - double-click authored control point, or near a finished path segment: delete the nearest authored control point and rebuild the path
+  - `Shift + Click` authored control point: delete that authored control point and rebuild the path
+  - `Shift + Click` finished path segment (while not drawing): delete that finished path
   - `Enter`: end current curve as open
   - hover near first point while drawing: start point turns green (close-ready)
   - click near first point while drawing: close curve and end it
