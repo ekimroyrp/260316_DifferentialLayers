@@ -134,6 +134,8 @@ const CLOSE_THRESHOLD_PX = 16;
 const FIXED_MASK_BLUR_STRENGTH = 0.35;
 const MAX_TIMELINE = 240;
 const MAX_UNDO = 80;
+const CLICKED_POINT_COMPLETE_COLOR = new Color(0x8d8d8d);
+const CLICKED_POINT_DRAFT_COLOR = new Color(0xffffff);
 
 const must = <T extends Element>(id: string) => {
   const el = document.getElementById(id);
@@ -312,16 +314,31 @@ const pointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
 }));
 pointsMesh.renderOrder = 30;
 simRoot.add(pointsMesh);
-const clickedPointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
-  color: 0xffffff,
-  size: 18,
+const closeCurveHintGeometry = new BufferGeometry();
+closeCurveHintGeometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0]), 3));
+const closeCurveHintMesh = new Points(closeCurveHintGeometry, new PointsMaterial({
+  color: 0x44ff7a,
+  size: 22,
   sizeAttenuation: false,
   transparent: true,
   opacity: 1,
   depthTest: false,
   depthWrite: false,
 }));
-clickedPointsMesh.renderOrder = 31;
+closeCurveHintMesh.renderOrder = 33;
+closeCurveHintMesh.visible = false;
+simRoot.add(closeCurveHintMesh);
+const clickedPointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
+  color: 0xffffff,
+  size: 18,
+  sizeAttenuation: false,
+  vertexColors: true,
+  transparent: true,
+  opacity: 1,
+  depthTest: false,
+  depthWrite: false,
+}));
+clickedPointsMesh.renderOrder = 32;
 simRoot.add(clickedPointsMesh);
 
 const engine = new DifferentialGrowthEngine(growthSettings, simulationSettings.seed);
@@ -352,6 +369,7 @@ const plane = new Plane(new Vector3(0, 1, 0), 0);
 const pointer = new Vector2();
 const tmpV = new Vector3();
 const tmpS = new Vector2();
+const pointerScreen = new Vector2();
 
 let curves: CurveData[] = [];
 let draft: CurvePoint[] = [];
@@ -367,6 +385,7 @@ let draggingPanel = false;
 let drawLockedAfterPause = false;
 let showClickedPointsAfterReset = false;
 let clickedPointCount = 0;
+let closeCurveHintActive = false;
 const dragOffset = { x: 0, y: 0 };
 
 const undo: UndoState[] = [];
@@ -678,6 +697,51 @@ function syncPointVisibility() {
   pointsMesh.visible = isPointDisplayEnabled();
 }
 
+function canCloseDraftCurve() {
+  return !appState.running && appState.viewMode !== 'mask' && !drawLockedAfterPause && draft.length >= 2;
+}
+
+function isPointerNearDraftStart(pointerPos: Vector2) {
+  if (!canCloseDraftCurve()) return false;
+  const startScreen = worldToScreen(draft[0]);
+  return isWithinCloseThreshold(startScreen, pointerPos, CLOSE_THRESHOLD_PX);
+}
+
+function syncCloseCurveHint() {
+  if (!canCloseDraftCurve()) {
+    closeCurveHintActive = false;
+    closeCurveHintMesh.visible = false;
+    return;
+  }
+  if (!closeCurveHintActive) {
+    closeCurveHintMesh.visible = false;
+    return;
+  }
+  const start = draft[0];
+  if (!start) {
+    closeCurveHintMesh.visible = false;
+    return;
+  }
+  const position = closeCurveHintGeometry.getAttribute('position') as BufferAttribute;
+  position.setXYZ(0, start.x, start.y, 0);
+  position.needsUpdate = true;
+  closeCurveHintMesh.visible = true;
+}
+
+function setCloseCurveHintActive(active: boolean) {
+  if (closeCurveHintActive === active) {
+    if (active) syncCloseCurveHint();
+    return;
+  }
+  closeCurveHintActive = active;
+  syncCloseCurveHint();
+}
+
+function updateCloseCurveHint(event: PointerEvent) {
+  pointerScreen.set(event.clientX, event.clientY);
+  setCloseCurveHintActive(isPointerNearDraftStart(pointerScreen));
+}
+
 function getClickedPointCurves() {
   if (!engineReady) return curves;
   if (baseCurves.length > 0) return baseCurves;
@@ -694,17 +758,25 @@ function syncClickedPointVisibility() {
 function refreshClickedPoints() {
   const authoredCurves = getClickedPointCurves();
   const arr: number[] = [];
+  const colors: number[] = [];
+
+  const pushPoint = (point: CurvePoint, color: Color) => {
+    arr.push(point.x, point.y, 0);
+    colors.push(color.r, color.g, color.b);
+  };
+
   for (const curve of authoredCurves) {
     for (const point of curve.points) {
-      arr.push(point.x, point.y, 0);
+      pushPoint(point, CLICKED_POINT_COMPLETE_COLOR);
     }
   }
   for (const point of draft) {
-    arr.push(point.x, point.y, 0);
+    pushPoint(point, CLICKED_POINT_DRAFT_COLOR);
   }
 
   const next = new BufferGeometry();
   next.setAttribute('position', new BufferAttribute(new Float32Array(arr), 3));
+  next.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
   const prev = clickedPointsMesh.geometry;
   clickedPointsMesh.geometry = next;
   prev.dispose();
@@ -966,6 +1038,7 @@ function refreshOverlays() {
   lineMesh.geometry = l; pointsMesh.geometry = p;
   syncPathVisibility();
   syncPointVisibility();
+  syncCloseCurveHint();
   refreshClickedPoints();
 }
 
@@ -991,6 +1064,7 @@ function syncUi() {
   syncLayerVisibility();
   syncPathVisibility();
   syncPointVisibility();
+  syncCloseCurveHint();
   syncClickedPointVisibility();
 }
 
@@ -1003,12 +1077,10 @@ function setMode(mode: ViewMode) {
 
 function addPoint(point: Vector3, event: PointerEvent) {
   if (drawLockedAfterPause) return;
-  if (draft.length >= 2) {
-    const startScreen = worldToScreen(draft[0]);
-    if (isWithinCloseThreshold(startScreen, new Vector2(event.clientX, event.clientY), CLOSE_THRESHOLD_PX)) {
-      finalizeDraft(true);
-      return;
-    }
+  pointerScreen.set(event.clientX, event.clientY);
+  if (isPointerNearDraftStart(pointerScreen)) {
+    finalizeDraft(true);
+    return;
   }
   const last = draft[draft.length - 1];
   if (last) {
@@ -1028,6 +1100,7 @@ function finalizeDraft(closed: boolean): boolean {
   if (draft.length < min) return false;
   curves.push({ id: nextCurveId++, closed, points: cloneDraft(draft) });
   draft = [];
+  setCloseCurveHintActive(false);
   engineReady = false;
   clearTimeline();
   refreshRibbon();
@@ -1393,15 +1466,31 @@ window.addEventListener('pointermove', (event) => {
     clampPanelToViewport();
     return;
   }
-  if (isPanelTarget(event)) { if (appState.viewMode === 'mask') setOverlay(null, false); return; }
-  if (appState.viewMode !== 'mask' || appState.running) return;
-  const point = pointerToPlane(event);
-  if (!point) return setOverlay(null, false);
-  if (painting) paintMask(point, event.shiftKey);
-  setOverlay(point, event.shiftKey);
+  if (isPanelTarget(event)) {
+    if (appState.viewMode === 'mask') setOverlay(null, false);
+    setCloseCurveHintActive(false);
+    return;
+  }
+  if (appState.viewMode === 'mask') {
+    if (appState.running) {
+      setOverlay(null, false);
+      return;
+    }
+    const point = pointerToPlane(event);
+    if (!point) return setOverlay(null, false);
+    if (painting) paintMask(point, event.shiftKey);
+    setOverlay(point, event.shiftKey);
+    return;
+  }
+  if (appState.running) {
+    setCloseCurveHintActive(false);
+    return;
+  }
+  updateCloseCurveHint(event);
 });
 window.addEventListener('pointerup', () => { painting = false; draggingPanel = false; });
 window.addEventListener('pointercancel', () => { painting = false; draggingPanel = false; });
+renderer.domElement.addEventListener('pointerleave', () => setCloseCurveHintActive(false));
 
 window.addEventListener('keydown', (event) => {
   const mod = event.ctrlKey || event.metaKey;

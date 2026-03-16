@@ -31,7 +31,10 @@
   - `Show Mesh` (default on): show/hide ribbon mesh.
   - `Show Path` (default off): show/hide curve path overlay.
   - `Show Points` (default off): show/hide growth points overlay.
-- Clicked authoring points are displayed as larger white box-style markers to distinguish them from growth points.
+- Clicked authoring points are displayed as larger markers to distinguish them from growth points:
+  - completed curve points are gray,
+  - active draft points are white,
+  - the start point turns green when hovering close enough to click-close the draft.
 - Paused draw lock: after pausing simulation, drawing is blocked until `Reset` or `Clear All`.
 
 ## Getting Started
@@ -54,6 +57,7 @@
 - Drawing:
   - `LMB`: add curve point on the ground plane
   - `Enter`: end current curve as open
+  - hover near first point while drawing: start point turns green (close-ready)
   - click near first point while drawing: close curve and end it
   - next `LMB`: start a new curve
   - after `Pause`: drawing is locked until `Reset` or `Clear All`
