@@ -1,67 +1,18 @@
 # 260316_DifferentialLayers
 
-260316_DifferentialLayers is a Three.js interactive differential-growth project focused on 2D user-drawn curves that evolve together as one shared system. You sketch open/closed curves directly on the ground plane, preview them as ribbon geometry, then run growth with repulsion, iteration smoothing, edge-length control, adaptive splitting, mask painting, timeline playback, and export outputs.
+260316_DifferentialLayers is a Three.js differential-growth sketch tool where you draw 2D paths, reshape them with direct point editing, and simulate layered ribbon growth with mask painting, timeline playback, and export tools. It is designed for fast iteration between path authoring, simulation tuning, and output.
 
 ## Features
 
-- Multi-curve path workflow on the ground plane with open-curve (`Enter`) and close-on-start-click behavior.
-- Live `Start Subdivision` preview updates while dragging, including path line and point overlays.
-- Live draw-time ribbon preview before simulation starts.
-- Shared differential-growth engine for all curves with:
-  - resampling to target spacing,
-  - adaptive segment splitting,
-  - global repulsion across curves,
-  - point-to-segment self-collision repulsion to reduce curve overlaps/intersections,
-  - iteration smoothing and shape retention,
-  - side-bias control to favor either side of the drawn median curve,
-  - seeded variation and deterministic snapshots.
-- Mask workflow (paint/erase/blur/clear) applied to curve growth.
-- Mask-reset behavior preserves baseline pre-run mask while also projecting paused runtime mask edits back onto reset state.
-- Reused visual stack from the 3D predecessor:
-  - same panel style/environment look,
-  - bloom + FXAA postprocessing,
-  - gradient/material controls.
-- Infinite fading ground grid (ShoeShaper-style) integrated into the scene.
-- Timeline scrubbing, undo/redo shortcuts, and export support (`OBJ`, `GLB`, `PNG`).
-- `OBJ`/`GLB` exports mirror current on-screen visibility:
-  - exports stacked layers when stack mode is active,
-  - exports only enabled object types (`Show Mesh`, `Show Curve`, `Show Points`),
-  - exports curves as joined polylines (instead of separate line segments).
-- `Stack Layers` simulation toggle:
-  - Off (default): classic single-layer simulation view.
-  - On: each iteration is stacked upward, with vertical spacing equal to Path Thickness.
-- `Flip Stack` toggle (default off):
-  - When enabled together with `Stack Layers`, oldest layers are placed at the top and new layers are placed at the bottom while staying above ground.
-- Stack overlay visibility:
-  - With `Stack Layers` enabled, `Show Curve` and `Show Points` display per-layer curve/point overlays for every stacked layer up to the current timeline layer.
-- Ribbon mesh now extrudes upward with thickness equal to `Path Thickness` (height = width).
-- Path visibility toggles:
-  - `Show Mesh` (default on): show/hide ribbon mesh.
-  - `Show Curve` (default off): show/hide curve path overlay.
-  - `Show Points` (default off): show/hide growth points overlay.
-- Clicked authoring points are displayed as larger markers to distinguish them from growth points:
-  - completed curve points are gray,
-  - active draft points are white,
-  - the start point turns green when hovering close enough to click-close the draft.
-- Authored control-point editing in draw mode:
-  - hover an existing control point to highlight it dark orange,
-  - click/select a control point to highlight it bright orange,
-  - drag the selected point to reshape the authored base curve,
-  - click a finished path segment (only when not drawing another path) to insert a new control point based on the visible subdivided curve shape,
-  - `Shift + Click` a control point to remove that authored control point and rebuild the path,
-  - `Shift + Click` a finished path segment (only when not drawing another path) to delete that finished path.
-- Mask preservation during authoring edits:
-  - moving control points keeps existing mask intent and reprojects mask onto updated curve samples,
-  - changing `Start Subdivision` keeps mask intent and remaps mask to the new subdivision density,
-  - deleting control points also remaps existing mask intent to the rebuilt path,
-  - inserting control points remaps existing mask intent to the rebuilt path.
-- Slider value labels are directly editable by click/type (with Enter/blur commit and Esc cancel), without spinner arrows.
-- Unfinished-path handling:
-  - `Start` clears any unfinished in-progress path instead of auto-finalizing it.
-  - Simulation runs only with finished paths.
-  - If no finished paths exist, `Start` does not run simulation.
-  - `Reset` clears unfinished in-progress path state.
-- Paused draw lock: after pausing simulation, drawing is blocked until `Reset` or `Clear All`.
+- Multi-path authoring on the ground plane with open finish (`Enter`) or close-to-start finish (start point highlights green on hover).
+- Control-point editing on finished paths: dark-orange hover, bright-orange active selection, drag to reshape, click path to add points, and `Shift + LMB` to delete points or full paths.
+- Draft/finalized point states are clearer: draft points stay white, completed path points turn gray.
+- `Start Subdivision` works with authored edits and supports `Reset Subdivision` for fast return to default.
+- Mask workflow (`paint`, `erase`, `blur`, `clear`) persists through point moves/add/delete and subdivision changes, and reset keeps the current mask state.
+- Differential-growth simulation with seeded jitter, repulsion, splitting, smoothing, shape retention, side bias, timeline scrubbing, and adjustable simulation rate.
+- Stack visualization with `Stack Layers` + `Flip Stack`, including per-layer curve/point overlays when `Show Curve` and `Show Points` are enabled.
+- Visibility-aware export: OBJ/GLB/Screenshot reflect what is currently on screen (mesh, curve, points, single layer vs full stack), and curve export uses joined polylines.
+- UI quality-of-life updates: editable numeric value fields, always-available `Start`, `Reset`, `Reset Subdivision`, and `Delete All Paths`.
 
 ## Getting Started
 
@@ -80,42 +31,39 @@
 
 ## Controls
 
-- Drawing:
-  - `LMB`: add curve point on the ground plane
-  - click finished path segment (while not drawing): insert control point on the displayed subdivided curve path
-  - `Reset Subdivision` button: reset `Start Subdivision` back to its default value
-  - hover an authored control point: dark-orange point highlight
-  - click an authored control point: bright-orange active highlight
-  - drag selected authored control point: reshape the curve
-  - `Shift + Click` authored control point: delete that authored control point and rebuild the path
-  - `Shift + Click` finished path segment (while not drawing): delete that finished path
-  - `Enter`: end current curve as open
-  - hover near first point while drawing: start point turns green (close-ready)
-  - click near first point while drawing: close curve and end it
-  - next `LMB`: start a new curve
-  - after `Pause`: drawing is locked until `Reset` or `Clear All`
+- Path authoring:
+  - `LMB`: draw/add path points
+  - `Enter`: finish current path as open
+  - connect to start point: finish current path as closed
+  - `LMB` on finished path segment (while not drawing): insert point
+  - `Shift + LMB` on finished path segment (while not drawing): delete path
+  - hover control point: dark-orange highlight
+  - `LMB` control point: bright-orange active highlight
+  - `LMB + Drag` control point: move point
+  - `Shift + LMB` control point: delete point
 - Camera:
-  - `RMB`: orbit
-  - `MMB`: pan
   - `Wheel`: zoom
+  - `MMB`: pan
+  - `RMB`: orbit
 - Mask mode:
-  - `LMB`: paint mask
-  - `Shift + LMB`: erase mask
-  - clicking `Enter Mask Mode`, `Blur Mask`, or `Clear Mask` while running pauses simulation and enters mask mode
+  - `LMB`: paint
+  - `Shift + LMB`: erase
+  - `Blur Mask` and `Clear Mask` update masks used by simulation/reset
 - Simulation:
-  - `Start/Pause`: run or stop growth
-  - `Start` with an unfinished path: unfinished path is discarded; only finished paths run
-  - `Reset`: reset geometry back to simulation start state while preserving mask intent
-  - `Reset Subdivision` and `Delete All Paths` stay available while running or paused; clicking them applies the action immediately and restarts simulation state
-  - `Simulation Timeline`: scrub recorded steps (when paused)
-- Visibility:
-  - `Show Mesh`: toggle ribbon mesh visibility
-  - `Show Curve`: toggle path/curve overlay visibility
-  - `Show Points`: toggle growth points overlay visibility
-- Stack:
-  - `Stack Layers`: render timeline layers in vertical stack
-  - `Flip Stack`: with stack enabled, place oldest layers at top and latest layers at bottom (still above ground)
-  - `Show Curve` + `Show Points` in stack mode: show overlays for each stacked layer up to the current layer
-- Editing:
+  - `Start/Pause`: run or pause growth
+  - `Start` with unfinished draft path: draft is discarded, only finished paths run
+  - `Reset`: reset simulation state using current masks and finished paths
+  - `Simulation Timeline`: scrub recorded frames while paused
+- Visibility and stacking:
+  - `Show Mesh`, `Show Curve`, `Show Points`: toggle visible geometry types
+  - `Stack Layers`: show layered history stack
+  - `Flip Stack`: invert stack ordering while keeping growth above ground
+- Shortcuts:
   - `Ctrl + Z`: undo
   - `Ctrl + Y` or `Ctrl + Shift + Z`: redo
+
+## Deployment
+
+- **Local production preview:** `npm install`, then `npm run build -- --base=./` followed by `npm run preview` to inspect the compiled bundle locally.
+- **Publish to GitHub Pages:** From a clean `main`, run `npm run build -- --base=./`. In a separate temp clone/worktree, checkout (or create) `gh-pages`, copy everything inside `dist/` to the branch root, include `.nojekyll` (and any required static folders like `env/`), commit with a descriptive message, then `git push origin gh-pages`.
+- **Live demo:** https://ekimroyrp.github.io/260316_DifferentialLayers/
