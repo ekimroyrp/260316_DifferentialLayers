@@ -131,7 +131,12 @@ type UndoState = {
 type EditableControlPointRef =
   | { source: 'curve'; curveIndex: number; pointIndex: number }
   | { source: 'draft'; pointIndex: number };
-type CurveInsertTarget = { curveIndex: number; segmentIndex: number };
+type CurveInsertTarget = {
+  curveIndex: number;
+  controlSegmentIndex: number;
+  segmentStart: CurvePoint;
+  segmentEnd: CurvePoint;
+};
 
 const CLOSE_THRESHOLD_PX = 16;
 const EDIT_POINT_HIT_THRESHOLD_PX = 16;
@@ -1005,15 +1010,22 @@ function findCurveInsertTarget(pointerPos: Vector2): CurveInsertTarget | null {
 
   let best: CurveInsertTarget | null = null;
   let bestDistanceSq = INSERT_POINT_HIT_THRESHOLD_PX * INSERT_POINT_HIT_THRESHOLD_PX;
+  const safeSubdivision = Math.max(1, Math.round(startSubdivision));
 
   for (let curveIndex = 0; curveIndex < curves.length; curveIndex += 1) {
     const curve = curves[curveIndex];
     const pointCount = curve.points.length;
     if (pointCount < 2) continue;
-    const segmentLimit = curve.closed ? pointCount : pointCount - 1;
-    for (let segmentIndex = 0; segmentIndex < segmentLimit; segmentIndex += 1) {
-      const a = curve.points[segmentIndex];
-      const b = curve.points[(segmentIndex + 1) % pointCount];
+
+    const previewPoints = buildSubdividedCurve(curve.points, curve.closed, safeSubdivision);
+    const previewCount = previewPoints.length;
+    const previewSegmentLimit = curve.closed ? previewCount : previewCount - 1;
+    const controlSegmentCount = curve.closed ? pointCount : pointCount - 1;
+    if (previewSegmentLimit <= 0 || controlSegmentCount <= 0) continue;
+
+    for (let segmentIndex = 0; segmentIndex < previewSegmentLimit; segmentIndex += 1) {
+      const a = previewPoints[segmentIndex];
+      const b = previewPoints[(segmentIndex + 1) % previewCount];
       const aScreen = worldToScreen(a);
       const bScreen = worldToScreen(b);
       const distanceSq = segmentPointDistanceSq(
@@ -1026,7 +1038,13 @@ function findCurveInsertTarget(pointerPos: Vector2): CurveInsertTarget | null {
       );
       if (distanceSq > bestDistanceSq) continue;
       bestDistanceSq = distanceSq;
-      best = { curveIndex, segmentIndex };
+      const controlSegmentIndex = Math.min(controlSegmentCount - 1, Math.floor(segmentIndex / safeSubdivision));
+      best = {
+        curveIndex,
+        controlSegmentIndex,
+        segmentStart: { x: a.x, y: a.y, z: a.z ?? 0 },
+        segmentEnd: { x: b.x, y: b.y, z: b.z ?? 0 },
+      };
     }
   }
 
@@ -1039,13 +1057,33 @@ function insertControlPointOnCurve(target: CurveInsertTarget, worldPoint: Vector
   const count = curve.points.length;
   if (count < 2) return false;
 
-  const aIndex = target.segmentIndex;
+  const aIndex = target.controlSegmentIndex;
   const bIndex = (aIndex + 1) % count;
-  const a = curve.points[aIndex];
-  const b = curve.points[bIndex];
-  const snapped = projectPointToSegment2d(a.x, a.y, b.x, b.y, worldPoint.x, worldPoint.y);
+  const snapped = projectPointToSegment2d(
+    target.segmentStart.x,
+    target.segmentStart.y,
+    target.segmentEnd.x,
+    target.segmentEnd.y,
+    worldPoint.x,
+    worldPoint.y,
+  );
   curve.points.splice(bIndex, 0, { x: snapped.x, y: snapped.y, z: 0 });
   return true;
+}
+
+function findDeleteControlPointFromCurveTarget(target: CurveInsertTarget, pointerPos: Vector2): EditableControlPointRef | null {
+  const curve = curves[target.curveIndex];
+  if (!curve) return null;
+  const count = curve.points.length;
+  if (count === 0) return null;
+
+  const aIndex = MathUtils.clamp(target.controlSegmentIndex, 0, Math.max(0, count - 1));
+  const bIndex = curve.closed ? (aIndex + 1) % count : Math.min(aIndex + 1, count - 1);
+  const aScreen = worldToScreen(curve.points[aIndex]);
+  const bScreen = worldToScreen(curve.points[bIndex]);
+  const da = (aScreen.x - pointerPos.x) ** 2 + (aScreen.y - pointerPos.y) ** 2;
+  const db = (bScreen.x - pointerPos.x) ** 2 + (bScreen.y - pointerPos.y) ** 2;
+  return { source: 'curve', curveIndex: target.curveIndex, pointIndex: da <= db ? aIndex : bIndex };
 }
 
 function deleteEditableControlPoint(ref: EditableControlPointRef) {
@@ -1269,7 +1307,7 @@ function isPanelTarget(event: Event): boolean {
   return event.target instanceof Element && event.target.closest('#ui-panel') !== null;
 }
 
-function worldToScreen(world: CurvePoint | Vector3): Vector2 {
+function worldToScreen(world: { x: number; y: number; z?: number } | Vector3): Vector2 {
   const rect = renderer.domElement.getBoundingClientRect();
   tmpV.set(world.x, world.y, 0);
   simRoot.localToWorld(tmpV);
@@ -1915,7 +1953,13 @@ renderer.domElement.addEventListener('dblclick', (event) => {
   if (event.button !== 0 || isPanelTarget(event)) return;
   if (!canEditControlPoints()) return;
   pointerScreen.set(event.clientX, event.clientY);
-  const editablePoint = findEditableControlPoint(pointerScreen);
+  let editablePoint = findEditableControlPoint(pointerScreen);
+  if (!editablePoint && draft.length === 0) {
+    const insertTarget = findCurveInsertTarget(pointerScreen);
+    if (insertTarget) {
+      editablePoint = findDeleteControlPointFromCurveTarget(insertTarget, pointerScreen);
+    }
+  }
   if (!editablePoint) return;
 
   if (engineReady) {
