@@ -236,7 +236,6 @@ const ui: Ui = {
 
 const canvas = document.querySelector<HTMLCanvasElement>('#app-canvas');
 if (!canvas) throw new Error('Missing canvas');
-document.documentElement.classList.add('ui-ready');
 
 const simulationSettings: SimulationSettings = {
   growthSpeed: parseFloat(ui.growthSpeed.value),
@@ -2406,3 +2405,7 @@ setMode('gradient');
 bindSectionCollapses();
 bindCustomSelect(ui.gradientType);
 updatePostSize();
+clampPanelToViewport();
+requestAnimationFrame(() => {
+  document.documentElement.classList.add('ui-ready');
+});
