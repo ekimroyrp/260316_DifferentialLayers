@@ -129,13 +129,19 @@ type UndoState = {
   snapshot: DifferentialGrowthSnapshot | null;
   baseCurves: CurveData[];
 };
+type EditableControlPointRef =
+  | { source: 'curve'; curveIndex: number; pointIndex: number }
+  | { source: 'draft'; pointIndex: number };
 
 const CLOSE_THRESHOLD_PX = 16;
+const EDIT_POINT_HIT_THRESHOLD_PX = 16;
 const FIXED_MASK_BLUR_STRENGTH = 0.35;
 const MAX_TIMELINE = 240;
 const MAX_UNDO = 80;
 const CLICKED_POINT_COMPLETE_COLOR = new Color(0x8d8d8d);
 const CLICKED_POINT_DRAFT_COLOR = new Color(0xffffff);
+const EDIT_POINT_HOVER_COLOR = 0xc06a00;
+const EDIT_POINT_ACTIVE_COLOR = 0xffa01f;
 
 const must = <T extends Element>(id: string) => {
   const el = document.getElementById(id);
@@ -328,6 +334,34 @@ const closeCurveHintMesh = new Points(closeCurveHintGeometry, new PointsMaterial
 closeCurveHintMesh.renderOrder = 33;
 closeCurveHintMesh.visible = false;
 simRoot.add(closeCurveHintMesh);
+const hoverEditPointGeometry = new BufferGeometry();
+hoverEditPointGeometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0]), 3));
+const hoverEditPointMesh = new Points(hoverEditPointGeometry, new PointsMaterial({
+  color: EDIT_POINT_HOVER_COLOR,
+  size: 22,
+  sizeAttenuation: false,
+  transparent: true,
+  opacity: 1,
+  depthTest: false,
+  depthWrite: false,
+}));
+hoverEditPointMesh.renderOrder = 34;
+hoverEditPointMesh.visible = false;
+simRoot.add(hoverEditPointMesh);
+const activeEditPointGeometry = new BufferGeometry();
+activeEditPointGeometry.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0]), 3));
+const activeEditPointMesh = new Points(activeEditPointGeometry, new PointsMaterial({
+  color: EDIT_POINT_ACTIVE_COLOR,
+  size: 24,
+  sizeAttenuation: false,
+  transparent: true,
+  opacity: 1,
+  depthTest: false,
+  depthWrite: false,
+}));
+activeEditPointMesh.renderOrder = 35;
+activeEditPointMesh.visible = false;
+simRoot.add(activeEditPointMesh);
 const clickedPointsMesh = new Points(new BufferGeometry(), new PointsMaterial({
   color: 0xffffff,
   size: 18,
@@ -386,6 +420,10 @@ let drawLockedAfterPause = false;
 let showClickedPointsAfterReset = false;
 let clickedPointCount = 0;
 let closeCurveHintActive = false;
+let hoverControlPoint: EditableControlPointRef | null = null;
+let activeControlPoint: EditableControlPointRef | null = null;
+let draggingControlPoint = false;
+let deferredMaskSnapshot: DifferentialGrowthSnapshot | null = null;
 const dragOffset = { x: 0, y: 0 };
 
 const undo: UndoState[] = [];
@@ -414,6 +452,7 @@ function pushUndoState() {
 function restoreState(state: UndoState) {
   curves = cloneCurves(state.curves);
   draft = cloneDraft(state.draft);
+  deferredMaskSnapshot = null;
   appState.running = false;
   appState.viewMode = state.viewMode;
   engineReady = state.engineReady;
@@ -697,8 +736,159 @@ function syncPointVisibility() {
   pointsMesh.visible = isPointDisplayEnabled();
 }
 
+function canEditControlPoints() {
+  return !appState.running && appState.viewMode !== 'mask' && !drawLockedAfterPause;
+}
+
+function sameEditableControlPoint(a: EditableControlPointRef | null, b: EditableControlPointRef | null) {
+  if (!a || !b || a.source !== b.source) return false;
+  if (a.source === 'curve' && b.source === 'curve') {
+    return a.curveIndex === b.curveIndex && a.pointIndex === b.pointIndex;
+  }
+  if (a.source === 'draft' && b.source === 'draft') {
+    return a.pointIndex === b.pointIndex;
+  }
+  return false;
+}
+
+function getEditableControlPoint(ref: EditableControlPointRef): CurvePoint | null {
+  if (ref.source === 'curve') {
+    const curve = curves[ref.curveIndex];
+    return curve?.points[ref.pointIndex] ?? null;
+  }
+  return draft[ref.pointIndex] ?? null;
+}
+
+function isEditableControlPointValid(ref: EditableControlPointRef | null): ref is EditableControlPointRef {
+  if (!ref) return false;
+  return getEditableControlPoint(ref) !== null;
+}
+
+function writeHintPointPosition(geometry: BufferGeometry, point: CurvePoint) {
+  const position = geometry.getAttribute('position') as BufferAttribute;
+  position.setXYZ(0, point.x, point.y, 0);
+  position.needsUpdate = true;
+}
+
+function syncEditableControlPointHints() {
+  if (!canEditControlPoints()) {
+    hoverControlPoint = null;
+    activeControlPoint = null;
+    draggingControlPoint = false;
+    hoverEditPointMesh.visible = false;
+    activeEditPointMesh.visible = false;
+    return;
+  }
+
+  if (!isEditableControlPointValid(activeControlPoint)) {
+    activeControlPoint = null;
+    draggingControlPoint = false;
+  }
+  if (!isEditableControlPointValid(hoverControlPoint)) {
+    hoverControlPoint = null;
+  }
+
+  if (activeControlPoint) {
+    const point = getEditableControlPoint(activeControlPoint);
+    if (point) {
+      writeHintPointPosition(activeEditPointGeometry, point);
+      activeEditPointMesh.visible = true;
+    } else {
+      activeEditPointMesh.visible = false;
+    }
+  } else {
+    activeEditPointMesh.visible = false;
+  }
+
+  if (hoverControlPoint && !sameEditableControlPoint(hoverControlPoint, activeControlPoint)) {
+    const point = getEditableControlPoint(hoverControlPoint);
+    if (point) {
+      writeHintPointPosition(hoverEditPointGeometry, point);
+      hoverEditPointMesh.visible = true;
+    } else {
+      hoverEditPointMesh.visible = false;
+    }
+  } else {
+    hoverEditPointMesh.visible = false;
+  }
+}
+
+function setHoverControlPoint(ref: EditableControlPointRef | null) {
+  hoverControlPoint = ref;
+  syncEditableControlPointHints();
+}
+
+function setActiveControlPoint(ref: EditableControlPointRef | null) {
+  activeControlPoint = ref;
+  syncEditableControlPointHints();
+}
+
+function findEditableControlPoint(pointerPos: Vector2): EditableControlPointRef | null {
+  if (!canEditControlPoints()) return null;
+
+  let closest: EditableControlPointRef | null = null;
+  let closestDistanceSq = EDIT_POINT_HIT_THRESHOLD_PX * EDIT_POINT_HIT_THRESHOLD_PX;
+
+  for (let curveIndex = 0; curveIndex < curves.length; curveIndex += 1) {
+    const curve = curves[curveIndex];
+    for (let pointIndex = 0; pointIndex < curve.points.length; pointIndex += 1) {
+      const screen = worldToScreen(curve.points[pointIndex]);
+      const dx = screen.x - pointerPos.x;
+      const dy = screen.y - pointerPos.y;
+      const distanceSq = dx * dx + dy * dy;
+      if (distanceSq > closestDistanceSq) continue;
+      closestDistanceSq = distanceSq;
+      closest = { source: 'curve', curveIndex, pointIndex };
+    }
+  }
+
+  const skipDraftStart = canCloseDraftCurve();
+  for (let pointIndex = 0; pointIndex < draft.length; pointIndex += 1) {
+    if (skipDraftStart && pointIndex === 0) continue;
+    const screen = worldToScreen(draft[pointIndex]);
+    const dx = screen.x - pointerPos.x;
+    const dy = screen.y - pointerPos.y;
+    const distanceSq = dx * dx + dy * dy;
+    if (distanceSq > closestDistanceSq) continue;
+    closestDistanceSq = distanceSq;
+    closest = { source: 'draft', pointIndex };
+  }
+
+  return closest;
+}
+
+function updateEditableControlPointHover(event: PointerEvent) {
+  pointerScreen.set(event.clientX, event.clientY);
+  setHoverControlPoint(findEditableControlPoint(pointerScreen));
+}
+
+function moveEditableControlPoint(ref: EditableControlPointRef, worldPoint: Vector3) {
+  const point = getEditableControlPoint(ref);
+  if (!point) return false;
+  const dx = point.x - worldPoint.x;
+  const dy = point.y - worldPoint.y;
+  if (dx * dx + dy * dy < 1e-8) return false;
+  point.x = worldPoint.x;
+  point.y = worldPoint.y;
+  point.z = 0;
+  return true;
+}
+
+function moveActiveControlPoint(worldPoint: Vector3) {
+  if (!activeControlPoint) return;
+  if (!moveEditableControlPoint(activeControlPoint, worldPoint)) return;
+  if (engineReady) {
+    deferredMaskSnapshot = engine.exportSnapshot();
+  }
+  engineReady = false;
+  clearTimeline();
+  refreshRibbon();
+  refreshOverlays();
+  refreshStatus();
+}
+
 function canCloseDraftCurve() {
-  return !appState.running && appState.viewMode !== 'mask' && !drawLockedAfterPause && draft.length >= 2;
+  return canEditControlPoints() && draft.length >= 2;
 }
 
 function isPointerNearDraftStart(pointerPos: Vector2) {
@@ -908,7 +1098,7 @@ function worldToScreen(world: CurvePoint | Vector3): Vector2 {
   return tmpS.clone();
 }
 
-function ensureEngine(setBase = true, subdivisionOverride?: number): boolean {
+function ensureEngine(setBase = true, subdivisionOverride?: number, maskSnapshotOverride?: DifferentialGrowthSnapshot | null): boolean {
   if (curves.length === 0) return false;
   const effectiveSubdivision = subdivisionOverride ?? startSubdivision;
   const preparedCurves = curves.map((curve) => ({
@@ -923,6 +1113,11 @@ function ensureEngine(setBase = true, subdivisionOverride?: number): boolean {
   engine.setGrowthSettings(growthSettings);
   engine.setCurves(preparedCurves, growthSettings.targetEdgeLength);
   engine.setGradientBlur(materialSettings.gradientBlur);
+  const maskSnapshot = maskSnapshotOverride ?? deferredMaskSnapshot;
+  if (maskSnapshot) {
+    engine.applyMaskFromSnapshot(maskSnapshot, 'replace');
+  }
+  deferredMaskSnapshot = null;
   engineReady = true;
   if (setBase) {
     baseCurves = cloneCurves(curves);
@@ -948,6 +1143,9 @@ function refreshRibbon() {
     previewEngine.setGrowthSettings(growthSettings);
     previewEngine.setGradientBlur(materialSettings.gradientBlur);
     previewEngine.setCurves(previewCurves, growthSettings.targetEdgeLength);
+    if (deferredMaskSnapshot) {
+      previewEngine.applyMaskFromSnapshot(deferredMaskSnapshot, 'replace');
+    }
     next = previewEngine.getRibbonGeometry(parseFloat(ui.ribbonWidth.value));
   }
 
@@ -1038,6 +1236,7 @@ function refreshOverlays() {
   lineMesh.geometry = l; pointsMesh.geometry = p;
   syncPathVisibility();
   syncPointVisibility();
+  syncEditableControlPointHints();
   syncCloseCurveHint();
   refreshClickedPoints();
 }
@@ -1064,6 +1263,7 @@ function syncUi() {
   syncLayerVisibility();
   syncPathVisibility();
   syncPointVisibility();
+  syncEditableControlPointHints();
   syncCloseCurveHint();
   syncClickedPointVisibility();
 }
@@ -1113,6 +1313,7 @@ function startStop() {
   if (appState.running) {
     appState.running = false;
     drawLockedAfterPause = true;
+    deferredMaskSnapshot = null;
     curves = engine.getCurves();
     engineReady = true;
     refreshOverlays();
@@ -1241,7 +1442,16 @@ function exportPng() {
 bindRange(ui.startSubdivision, ui.startSubdivisionValue, (v) => `${Math.round(v)}`, (v) => {
   const nextSubdivision = Math.max(1, Math.round(v));
   if (nextSubdivision === startSubdivision) return;
+  if (engineReady) {
+    deferredMaskSnapshot = engine.exportSnapshot();
+  }
   startSubdivision = nextSubdivision;
+  if (draft.length === 0 && curves.length > 0 && ensureEngine(true, startSubdivision)) {
+    refreshOverlays();
+    refreshStatus();
+    syncUi();
+    return;
+  }
   engineReady = false;
   clearTimeline();
   refreshRibbon();
@@ -1281,6 +1491,7 @@ ui.start.addEventListener('click', () => { pushUndoState(); startStop(); refresh
 ui.reset.addEventListener('click', () => {
   pushUndoState();
   const currentMaskSnapshot = engineReady ? engine.exportSnapshot() : null;
+  deferredMaskSnapshot = null;
   drawLockedAfterPause = false;
   showClickedPointsAfterReset = false;
   appState.running = false;
@@ -1312,6 +1523,7 @@ ui.reset.addEventListener('click', () => {
       resetTimeline();
     }
   } else {
+    deferredMaskSnapshot = null;
     engineReady = false;
     clearRibbon();
     clearTimeline();
@@ -1368,6 +1580,7 @@ ui.clearCurves.addEventListener('click', () => {
   pushUndoState();
   drawLockedAfterPause = false;
   showClickedPointsAfterReset = false;
+  deferredMaskSnapshot = null;
   curves = []; draft = []; baseCurves = []; baseResetSnapshot = null; engineReady = false; clearRibbon(); clearTimeline(); refreshOverlays(); refreshStatus();
 });
 
@@ -1443,6 +1656,22 @@ ui.handleBottom.addEventListener('pointerdown', beginPanelDrag);
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (event.button !== 0 || isPanelTarget(event)) return;
+  pointerScreen.set(event.clientX, event.clientY);
+
+  if (canEditControlPoints()) {
+    const editablePoint = findEditableControlPoint(pointerScreen);
+    if (editablePoint) {
+      pushUndoState();
+      draggingControlPoint = true;
+      setActiveControlPoint(editablePoint);
+      setHoverControlPoint(editablePoint);
+      setCloseCurveHintActive(false);
+      const point = pointerToPlane(event);
+      if (point) moveActiveControlPoint(point);
+      return;
+    }
+  }
+
   const point = pointerToPlane(event); if (!point) return;
   if (appState.viewMode === 'mask' && engineReady && !appState.running) {
     pushUndoState();
@@ -1466,12 +1695,21 @@ window.addEventListener('pointermove', (event) => {
     clampPanelToViewport();
     return;
   }
+  if (draggingControlPoint && activeControlPoint) {
+    const point = pointerToPlane(event);
+    if (!point) return;
+    moveActiveControlPoint(point);
+    return;
+  }
   if (isPanelTarget(event)) {
     if (appState.viewMode === 'mask') setOverlay(null, false);
+    setHoverControlPoint(null);
     setCloseCurveHintActive(false);
     return;
   }
   if (appState.viewMode === 'mask') {
+    setHoverControlPoint(null);
+    setCloseCurveHintActive(false);
     if (appState.running) {
       setOverlay(null, false);
       return;
@@ -1483,14 +1721,36 @@ window.addEventListener('pointermove', (event) => {
     return;
   }
   if (appState.running) {
+    setHoverControlPoint(null);
+    setCloseCurveHintActive(false);
+    return;
+  }
+  updateEditableControlPointHover(event);
+  if (hoverControlPoint) {
     setCloseCurveHintActive(false);
     return;
   }
   updateCloseCurveHint(event);
 });
-window.addEventListener('pointerup', () => { painting = false; draggingPanel = false; });
-window.addEventListener('pointercancel', () => { painting = false; draggingPanel = false; });
-renderer.domElement.addEventListener('pointerleave', () => setCloseCurveHintActive(false));
+window.addEventListener('pointerup', (event) => {
+  painting = false;
+  draggingPanel = false;
+  if (!draggingControlPoint) return;
+  draggingControlPoint = false;
+  setActiveControlPoint(null);
+  pointerScreen.set(event.clientX, event.clientY);
+  setHoverControlPoint(findEditableControlPoint(pointerScreen));
+});
+window.addEventListener('pointercancel', () => {
+  painting = false;
+  draggingPanel = false;
+  draggingControlPoint = false;
+  setActiveControlPoint(null);
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+  setCloseCurveHintActive(false);
+  if (!draggingControlPoint) setHoverControlPoint(null);
+});
 
 window.addEventListener('keydown', (event) => {
   const mod = event.ctrlKey || event.metaKey;

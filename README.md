@@ -35,6 +35,13 @@
   - completed curve points are gray,
   - active draft points are white,
   - the start point turns green when hovering close enough to click-close the draft.
+- Authored control-point editing in draw mode:
+  - hover an existing control point to highlight it dark orange,
+  - click/select a control point to highlight it bright orange,
+  - drag the selected point to reshape the authored base curve.
+- Mask preservation during authoring edits:
+  - moving control points keeps existing mask intent and reprojects mask onto updated curve samples,
+  - changing `Start Subdivision` keeps mask intent and remaps mask to the new subdivision density.
 - Paused draw lock: after pausing simulation, drawing is blocked until `Reset` or `Clear All`.
 
 ## Getting Started
@@ -56,6 +63,9 @@
 
 - Drawing:
   - `LMB`: add curve point on the ground plane
+  - hover an authored control point: dark-orange point highlight
+  - click an authored control point: bright-orange active highlight
+  - drag selected authored control point: reshape the curve
   - `Enter`: end current curve as open
   - hover near first point while drawing: start point turns green (close-ready)
   - click near first point while drawing: close curve and end it
