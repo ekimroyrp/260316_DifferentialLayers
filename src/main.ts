@@ -311,6 +311,7 @@ controls.target.set(0, 0, 0);
 controls.mouseButtons = { LEFT: -1 as unknown as MOUSE, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.ROTATE };
 controls.update();
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+ui.panel.addEventListener('contextmenu', (event) => event.preventDefault());
 
 const materialController = new MaterialController(materialSettings);
 const simRoot = new Group();
